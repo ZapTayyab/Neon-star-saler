@@ -1,0 +1,67 @@
+export type GameState = 'title' | 'playing' | 'upgrade' | 'paused' | 'gameover' | 'victory';
+
+export type EnemyType = 'stalker' | 'goliath' | 'sniper' | 'colossus';
+
+export interface UpgradeOption {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  rarity: 'common' | 'rare' | 'epic' | 'legendary';
+  level: number;
+  maxLevel: number;
+}
+
+export interface PlayerStats {
+  maxHp: number;
+  hp: number;
+  maxShield: number;
+  shield: number;
+  shieldRegenRate: number;
+  shieldDelayTimer: number;
+  moveSpeed: number;
+  dashCharges: number;
+  maxDashCharges: number;
+  dashCooldown: number;
+  dashTimer: number;
+  isDashing: boolean;
+  dashTimeRemaining: number;
+  empCharge: number; // 0 to 100
+  score: number;
+  combo: number;
+  comboTimer: number;
+  comboMultiplier: number;
+  wave: number;
+  xp: number;
+  xpToNextLevel: number;
+  level: number;
+  kills: number;
+  // Upgrade levels
+  bulletSpread: number; // 1, 2, 3, 4
+  fireRate: number; // shots per sec
+  bulletDamage: number;
+  pierceCount: number;
+  chainLightning: boolean;
+  orbitalDrones: number;
+  siphonChance: number;
+}
+
+export interface TelegraphIndicator {
+  type: 'line' | 'circle' | 'cone';
+  x: number;
+  z: number;
+  targetX?: number;
+  targetZ?: number;
+  radius?: number;
+  angle?: number;
+  progress: number; // 0 to 1
+  duration: number;
+  color: string;
+}
+
+export interface GameTelemetry {
+  fps: number;
+  enemiesActive: number;
+  particlesActive: number;
+  timeElapsed: number;
+}
