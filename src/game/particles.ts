@@ -83,7 +83,7 @@ export class ParticleManager {
     this.geometry = new THREE.BufferGeometry();
     this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
     this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
-    this.geometry.setAttribute('size', new THREE.BufferAttribute(this.sizes, 1));
+    this.geometry.setAttribute('aSize', new THREE.BufferAttribute(this.sizes, 1));
 
     // Particle sprite canvas texture: smooth feathered circular spark with ultra-hot white core
     const canvas = document.createElement('canvas');
@@ -102,12 +102,13 @@ export class ParticleManager {
     texture.colorSpace = THREE.SRGBColorSpace;
 
     const material = new THREE.PointsMaterial({
-      size: 0.8,
+      size: 1.0,
       vertexColors: true,
       map: texture,
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      sizeAttenuation: false,
     });
 
     // Hook shader to read per-particle vertex size and apply distance perspective
@@ -115,11 +116,11 @@ export class ParticleManager {
       shader.vertexShader = shader.vertexShader.replace(
         '#include <common>',
         `#include <common>
-attribute float size;`
+attribute float aSize;`
       );
       shader.vertexShader = shader.vertexShader.replace(
         'gl_PointSize = size;',
-        'gl_PointSize = size * ( 260.0 / - mvPosition.z );'
+        'gl_PointSize = aSize * ( 260.0 / - mvPosition.z );'
       );
     };
 
@@ -223,6 +224,225 @@ attribute float size;`
     }
   }
 
+  /**
+   * Spawns high-contrast, neon-blue particle trails behind the mech whenever a kinetic dash is performed.
+   * Emits luminous blue/cyan plasma ribbons with white-hot core sparks, backward exhaust velocity,
+   * lateral turbulence, and rapid fade to accentuate the extreme sensation of speed.
+   */
+  public spawnDashTrail(
+    leftX: number,
+    leftY: number,
+    leftZ: number,
+    rightX: number,
+    rightY: number,
+    rightZ: number,
+    dashVx: number,
+    dashVz: number,
+    customColor?: number
+  ) {
+    const sources = [
+      { x: leftX, y: leftY, z: leftZ },
+      { x: rightX, y: rightY, z: rightZ },
+      { x: (leftX + rightX) / 2, y: (leftY + rightY) / 2, z: (leftZ + rightZ) / 2 },
+    ];
+
+    const countPerSource = 3;
+    sources.forEach((source, sIdx) => {
+      for (let k = 0; k < countPerSource; k++) {
+        const idx = (this.poolCursor + k + sIdx * countPerSource) % MAX_PARTICLES;
+        const p = this.pool[idx];
+        if (!p.active) {
+          p.active = true;
+          // Jitter slightly for volumetric wake breadth
+          p.x = source.x + (Math.random() - 0.5) * 0.16;
+          p.y = source.y + (Math.random() - 0.5) * 0.14;
+          p.z = source.z + (Math.random() - 0.5) * 0.16;
+
+          // Eject backward opposite to dash direction with slight exhaust flare
+          const revX = -dashVx * 0.22;
+          const revZ = -dashVz * 0.22;
+          const flareAngle = Math.random() * Math.PI * 2;
+          const flareSpeed = 1.0 + Math.random() * 2.8;
+
+          p.vx = revX + Math.cos(flareAngle) * flareSpeed;
+          p.vy = (Math.random() - 0.3) * 1.5;
+          p.vz = revZ + Math.sin(flareAngle) * flareSpeed;
+
+          // High-contrast neon-blue palette with white-hot core sparks
+          let colHex: number;
+          if (customColor && Math.random() < 0.6) {
+            colHex = customColor;
+          } else {
+            const roll = Math.random();
+            if (roll < 0.3) colHex = 0xffffff; // White-hot core spark
+            else if (roll < 0.65) colHex = 0x00f0ff; // Neon Cyan
+            else if (roll < 0.85) colHex = 0x0066ff; // High-contrast Electric Blue
+            else colHex = 0x00d4ff; // Vibrant Azure
+          }
+
+          _tempColor.setHex(colHex);
+          p.r = _tempColor.r;
+          p.g = _tempColor.g;
+          p.b = _tempColor.b;
+
+          // Bold initial size for high visibility streak
+          p.size = (colHex === 0xffffff ? 0.95 : 0.7) + Math.random() * 0.45;
+          p.life = 0.2 + Math.random() * 0.18; // 0.2s - 0.38s
+          p.maxLife = p.life;
+          p.drag = 4.0; // snappy pop & fade
+
+          this.poolCursor = (idx + 1) % MAX_PARTICLES;
+        }
+      }
+    });
+  }
+
+  public spawnPortalSwirl(
+    x: number,
+    y: number,
+    z: number,
+    radius: number = 3.2,
+    color: number = 0x00f0ff
+  ) {
+    const count = 4;
+    _tempColor.setHex(color);
+    for (let k = 0; k < count; k++) {
+      const idx = (this.poolCursor + k) % MAX_PARTICLES;
+      const p = this.pool[idx];
+      if (!p.active) {
+        p.active = true;
+        const angle = Math.random() * Math.PI * 2;
+        const r = radius * (0.35 + Math.random() * 0.8);
+        p.x = x + Math.cos(angle) * r;
+        p.y = y + (Math.random() - 0.5) * 0.6;
+        p.z = z + Math.sin(angle) * r;
+
+        // Swirling vortex velocity towards singularity
+        const speed = 4.5 + Math.random() * 3.5;
+        p.vx = -Math.sin(angle) * speed - Math.cos(angle) * 1.8;
+        p.vy = 1.2 + Math.random() * 3.8;
+        p.vz = Math.cos(angle) * speed - Math.sin(angle) * 1.8;
+
+        const isWhite = Math.random() < 0.25;
+        if (isWhite) {
+          p.r = 1;
+          p.g = 1;
+          p.b = 1;
+        } else {
+          p.r = _tempColor.r;
+          p.g = _tempColor.g;
+          p.b = _tempColor.b;
+        }
+
+        p.size = 0.55 + Math.random() * 0.4;
+        p.life = 0.35 + Math.random() * 0.25;
+        p.maxLife = p.life;
+        p.drag = 2.0;
+
+        this.poolCursor = (idx + 1) % MAX_PARTICLES;
+      }
+    }
+  }
+
+  /**
+   * Spawns high-voltage electric crackle sparks for electrified floor tiles.
+   */
+  public spawnElectricSparks(
+    x: number,
+    y: number,
+    z: number,
+    count: number = 6,
+    spreadRadius: number = 2.5
+  ) {
+    for (let k = 0; k < count; k++) {
+      const idx = (this.poolCursor + k) % MAX_PARTICLES;
+      const p = this.pool[idx];
+      if (!p.active) {
+        p.active = true;
+        p.x = x + (Math.random() - 0.5) * spreadRadius * 2;
+        p.y = y + Math.random() * 0.4;
+        p.z = z + (Math.random() - 0.5) * spreadRadius * 2;
+
+        const angle = Math.random() * Math.PI * 2;
+        const spd = 4.0 + Math.random() * 8.0;
+        p.vx = Math.cos(angle) * spd;
+        p.vy = 2.5 + Math.random() * 5.0;
+        p.vz = Math.sin(angle) * spd;
+
+        const isWhite = Math.random() < 0.35;
+        if (isWhite) {
+          p.r = 1;
+          p.g = 1;
+          p.b = 1;
+        } else {
+          // Vivid cyan / electric blue
+          _tempColor.setHex(Math.random() < 0.6 ? 0x00f0ff : 0x38bdf8);
+          p.r = _tempColor.r;
+          p.g = _tempColor.g;
+          p.b = _tempColor.b;
+        }
+
+        p.size = (isWhite ? 0.75 : 0.5) + Math.random() * 0.35;
+        p.life = 0.12 + Math.random() * 0.12;
+        p.maxLife = p.life;
+        p.drag = 5.0;
+
+        this.poolCursor = (idx + 1) % MAX_PARTICLES;
+      }
+    }
+  }
+
+  /**
+   * Spawns hot molten sparks where a laser beam cuts across the floor.
+   */
+  public spawnLaserSparks(
+    x: number,
+    y: number,
+    z: number,
+    count: number = 4,
+    dirX: number = 0,
+    dirZ: number = 0
+  ) {
+    for (let k = 0; k < count; k++) {
+      const idx = (this.poolCursor + k) % MAX_PARTICLES;
+      const p = this.pool[idx];
+      if (!p.active) {
+        p.active = true;
+        p.x = x + (Math.random() - 0.5) * 0.4;
+        p.y = y + 0.1 + Math.random() * 0.2;
+        p.z = z + (Math.random() - 0.5) * 0.4;
+
+        // Spray outwards perpendicular to beam or radial
+        const perpX = -dirZ;
+        const perpZ = dirX;
+        const side = Math.random() < 0.5 ? 1 : -1;
+        const spd = 3.5 + Math.random() * 6.5;
+
+        p.vx = perpX * side * spd + (Math.random() - 0.5) * 2;
+        p.vy = 1.5 + Math.random() * 4.0;
+        p.vz = perpZ * side * spd + (Math.random() - 0.5) * 2;
+
+        const roll = Math.random();
+        if (roll < 0.3) {
+          p.r = 1; p.g = 1; p.b = 1; // Pure hot white
+        } else if (roll < 0.7) {
+          _tempColor.setHex(0xffea00); // Solar yellow
+          p.r = _tempColor.r; p.g = _tempColor.g; p.b = _tempColor.b;
+        } else {
+          _tempColor.setHex(0xff3b30); // Crimson flame
+          p.r = _tempColor.r; p.g = _tempColor.g; p.b = _tempColor.b;
+        }
+
+        p.size = 0.6 + Math.random() * 0.35;
+        p.life = 0.14 + Math.random() * 0.14;
+        p.maxLife = p.life;
+        p.drag = 4.5;
+
+        this.poolCursor = (idx + 1) % MAX_PARTICLES;
+      }
+    }
+  }
+
   public spawn(
     x: number,
     y: number,
@@ -277,7 +497,7 @@ attribute float size;`
   public update(dt: number) {
     const posAttr = this.geometry.attributes.position as THREE.BufferAttribute;
     const colAttr = this.geometry.attributes.color as THREE.BufferAttribute;
-    const sizeAttr = this.geometry.attributes.size as THREE.BufferAttribute;
+    const sizeAttr = (this.geometry.attributes.aSize || this.geometry.attributes.size) as THREE.BufferAttribute;
 
     for (let i = 0; i < MAX_PARTICLES; i++) {
       const p = this.pool[i];

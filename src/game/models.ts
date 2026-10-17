@@ -159,7 +159,8 @@ export function createPlayerMech(): {
   });
   hullGeo.rotateX(Math.PI / 2);
   hullGeo.center();
-  const hullMesh = new THREE.Mesh(hullGeo, materials.playerHull);
+  const hullMesh = new THREE.Mesh(hullGeo, materials.playerHull.clone());
+  hullMesh.userData.part = 'hull';
   hullMesh.position.y = 0.55;
   hullMesh.castShadow = true;
   group.add(hullMesh);
@@ -168,7 +169,8 @@ export function createPlayerMech(): {
   const canopyGeo = new THREE.ConeGeometry(0.32, 0.9, 5);
   canopyGeo.rotateX(Math.PI / 2);
   canopyGeo.scale(1, 0.5, 1);
-  const canopyMesh = new THREE.Mesh(canopyGeo, materials.playerCanopy);
+  const canopyMesh = new THREE.Mesh(canopyGeo, materials.playerCanopy.clone());
+  canopyMesh.userData.part = 'canopy';
   canopyMesh.position.set(0, 0.75, -0.15);
   group.add(canopyMesh);
 
@@ -182,14 +184,16 @@ export function createPlayerMech(): {
 
   const wingGeoL = new THREE.ExtrudeGeometry(wingShape, { depth: 0.06, bevelEnabled: false });
   wingGeoL.rotateX(Math.PI / 2);
-  const wingMeshL = new THREE.Mesh(wingGeoL, materials.playerWings);
+  const wingMeshL = new THREE.Mesh(wingGeoL, materials.playerWings.clone());
+  wingMeshL.userData.part = 'wings';
   wingMeshL.position.set(0.4, 0.52, 0.2);
   wingMeshL.castShadow = true;
   group.add(wingMeshL);
 
   const wingGeoR = wingGeoL.clone();
   wingGeoR.scale(-1, 1, 1);
-  const wingMeshR = new THREE.Mesh(wingGeoR, materials.playerWings);
+  const wingMeshR = new THREE.Mesh(wingGeoR, materials.playerWings.clone());
+  wingMeshR.userData.part = 'wings';
   wingMeshR.position.set(-0.4, 0.52, 0.2);
   wingMeshR.castShadow = true;
   group.add(wingMeshR);
@@ -197,52 +201,64 @@ export function createPlayerMech(): {
   // 5 & 6. Twin Dual Plasma Cannons
   const cannonGeo = new THREE.CylinderGeometry(0.06, 0.07, 0.9, 8);
   cannonGeo.rotateX(Math.PI / 2);
-  const barrelL = new THREE.Mesh(cannonGeo, materials.playerGuns);
+  const barrelL = new THREE.Mesh(cannonGeo, materials.playerGuns.clone());
+  barrelL.userData.part = 'guns';
   barrelL.position.set(0.65, 0.52, -0.2);
   barrelL.castShadow = true;
   group.add(barrelL);
 
   const muzzleMouldL = new THREE.Mesh(
     new THREE.TorusGeometry(0.08, 0.02, 6, 12),
-    materials.playerTrim
+    materials.playerTrim.clone()
   );
+  muzzleMouldL.userData.part = 'trim';
   muzzleMouldL.position.set(0.65, 0.52, -0.65);
   group.add(muzzleMouldL);
 
-  const barrelR = new THREE.Mesh(cannonGeo, materials.playerGuns);
+  const barrelR = new THREE.Mesh(cannonGeo, materials.playerGuns.clone());
+  barrelR.userData.part = 'guns';
   barrelR.position.set(-0.65, 0.52, -0.2);
   barrelR.castShadow = true;
   group.add(barrelR);
 
-  const muzzleMouldR = muzzleMouldL.clone();
+  const muzzleMouldR = new THREE.Mesh(
+    new THREE.TorusGeometry(0.08, 0.02, 6, 12),
+    materials.playerTrim.clone()
+  );
+  muzzleMouldR.userData.part = 'trim';
   muzzleMouldR.position.set(-0.65, 0.52, -0.65);
   group.add(muzzleMouldR);
 
   // 7 & 8. Rear Plasma Hover Thrusters
   const thrusterHousingGeo = new THREE.CylinderGeometry(0.14, 0.18, 0.45, 8);
   thrusterHousingGeo.rotateX(Math.PI / 2);
-  const houseL = new THREE.Mesh(thrusterHousingGeo, materials.playerHull);
+  const houseL = new THREE.Mesh(thrusterHousingGeo, materials.playerHull.clone());
+  houseL.userData.part = 'hull';
   houseL.position.set(0.35, 0.55, 0.85);
   group.add(houseL);
 
-  const houseR = houseL.clone();
+  const houseR = new THREE.Mesh(thrusterHousingGeo, materials.playerHull.clone());
+  houseR.userData.part = 'hull';
   houseR.position.set(-0.35, 0.55, 0.85);
   group.add(houseR);
 
   // Dynamic Thruster Flame Plumes
   const flameGeo = new THREE.ConeGeometry(0.12, 0.6, 8);
   flameGeo.rotateX(-Math.PI / 2);
-  const thrusterL = new THREE.Mesh(flameGeo, materials.thrusterFlame);
+  const thrusterL = new THREE.Mesh(flameGeo, materials.thrusterFlame.clone());
+  thrusterL.userData.part = 'thruster';
   thrusterL.position.set(0.35, 0.55, 1.25);
   group.add(thrusterL);
 
-  const thrusterR = thrusterL.clone();
+  const thrusterR = new THREE.Mesh(flameGeo, materials.thrusterFlame.clone());
+  thrusterR.userData.part = 'thruster';
   thrusterR.position.set(-0.35, 0.55, 1.25);
   group.add(thrusterR);
 
   // 9. Central Pulsing Reactor Core
   const coreGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.3, 6);
-  const core = new THREE.Mesh(coreGeo, materials.playerTrim);
+  const core = new THREE.Mesh(coreGeo, materials.playerTrim.clone());
+  core.userData.part = 'core';
   core.position.set(0, 0.65, 0.1);
   group.add(core);
 

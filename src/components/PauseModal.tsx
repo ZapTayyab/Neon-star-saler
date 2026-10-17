@@ -1,6 +1,5 @@
 import React from 'react';
-import { Play, RotateCcw, Home, Volume2, VolumeX, Sliders } from 'lucide-react';
-import { sound } from '../game/audio';
+import { Play, RotateCcw, Home, Volume2, VolumeX, Sliders, Palette } from 'lucide-react';
 
 interface PauseModalProps {
   onResume: () => void;
@@ -8,6 +7,7 @@ interface PauseModalProps {
   onMenu: () => void;
   isMuted: boolean;
   onToggleMute: () => void;
+  onOpenHangar?: () => void;
 }
 
 export const PauseModal: React.FC<PauseModalProps> = ({
@@ -16,9 +16,10 @@ export const PauseModal: React.FC<PauseModalProps> = ({
   onMenu,
   isMuted,
   onToggleMute,
+  onOpenHangar,
 }) => {
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center p-4 bg-black/80">
+    <div className="absolute inset-0 z-30 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm select-none">
       <div className="w-full max-w-md bg-neutral-950 border border-neutral-800 p-6 md:p-8 rounded-sm shadow-[0_0_50px_rgba(0,0,0,0.9)] text-center">
         <div className="text-[10px] font-mono-numbers text-cyan-400 tracking-[0.3em] uppercase font-bold">
           // SIMULATION SUSPENDED //
@@ -27,9 +28,9 @@ export const PauseModal: React.FC<PauseModalProps> = ({
           TACTICAL PAUSE
         </h2>
 
-        {/* Audio control panel */}
-        <div className="p-4 bg-neutral-900/60 border border-neutral-800 rounded-xs mb-6 text-left">
-          <div className="flex items-center justify-between mb-3">
+        {/* Audio & Hangar quick panel */}
+        <div className="p-4 bg-neutral-900/60 border border-neutral-800 rounded-xs mb-6 text-left space-y-3">
+          <div className="flex items-center justify-between">
             <span className="text-xs font-mono-numbers text-neutral-300 uppercase tracking-wider font-semibold flex items-center gap-2">
               <Sliders className="w-3.5 h-3.5 text-cyan-400" />
               AUDIO SYNTHESIZER
@@ -42,6 +43,21 @@ export const PauseModal: React.FC<PauseModalProps> = ({
               <span>{isMuted ? 'UNMUTE' : 'MUTE'}</span>
             </button>
           </div>
+
+          {onOpenHangar && (
+            <div className="flex items-center justify-between pt-2 border-t border-neutral-800/80">
+              <span className="text-xs font-mono-numbers text-neutral-300 uppercase tracking-wider font-semibold flex items-center gap-2">
+                <Palette className="w-3.5 h-3.5 text-cyan-400" />
+                HOVER CHASSIS
+              </span>
+              <button
+                onClick={onOpenHangar}
+                className="px-2.5 py-1 rounded border border-cyan-500/40 bg-cyan-950/40 hover:bg-cyan-900/60 text-xs font-mono-numbers text-cyan-300 flex items-center gap-1 cursor-pointer font-bold"
+              >
+                CUSTOMIZE SKINS
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Controls Cheatsheet */}

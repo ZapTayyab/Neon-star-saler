@@ -79,10 +79,13 @@ class SoundEngine {
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
 
+    const safeFreq = Number.isFinite(frequency) && frequency > 0 ? frequency : 840;
+    const safeDetune = Number.isFinite(detune) ? detune : 0;
+
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(frequency, t);
+    osc.frequency.setValueAtTime(safeFreq, t);
     osc.frequency.exponentialRampToValueAtTime(140, t + 0.12);
-    if (detune !== 0) osc.detune.setValueAtTime(detune, t);
+    if (safeDetune !== 0) osc.detune.setValueAtTime(safeDetune, t);
 
     gain.gain.setValueAtTime(0.25, t);
     gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
@@ -278,6 +281,82 @@ class SoundEngine {
     osc.stop(t + 0.12);
   }
 
+  public playPortalSpawn() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const t = this.ctx.currentTime;
+    // Crystalline harmonic chords
+    const freqs = [330, 495, 660, 990];
+    freqs.forEach((freq, idx) => {
+      if (!this.ctx || !this.sfxGain) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const startT = t + idx * 0.08;
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq * 0.7, startT);
+      osc.frequency.exponentialRampToValueAtTime(freq, startT + 0.35);
+
+      gain.gain.setValueAtTime(0.18, startT);
+      gain.gain.exponentialRampToValueAtTime(0.001, startT + 0.55);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+
+      osc.start(startT);
+      osc.stop(startT + 0.55);
+    });
+  }
+
+  public playPortalWarp() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const t = this.ctx.currentTime;
+    const duration = 0.9;
+
+    // Sub bass drop
+    const subOsc = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    subOsc.type = 'sine';
+    subOsc.frequency.setValueAtTime(240, t);
+    subOsc.frequency.exponentialRampToValueAtTime(32, t + duration);
+    subGain.gain.setValueAtTime(0.65, t);
+    subGain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    subOsc.connect(subGain);
+    subGain.connect(this.sfxGain);
+    subOsc.start(t);
+    subOsc.stop(t + duration);
+
+    // Filtered noise warp whoosh
+    const bufferSize = this.ctx.sampleRate * duration;
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(300, t);
+    filter.frequency.exponentialRampToValueAtTime(3600, t + 0.35);
+    filter.frequency.exponentialRampToValueAtTime(150, t + duration);
+    filter.Q.setValueAtTime(5.0, t);
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.55, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(this.sfxGain);
+    noise.start(t);
+    noise.stop(t + duration);
+  }
+
   public playLevelUp() {
     if (this.isMuted) return;
     this.initCtx();
@@ -312,7 +391,8 @@ class SoundEngine {
     if (!this.ctx || !this.sfxGain) return;
 
     const t = this.ctx.currentTime;
-    const baseFreq = Math.min(1200, 440 + combo * 25);
+    const safeCombo = Number.isFinite(combo) && combo >= 0 ? combo : 0;
+    const baseFreq = Math.min(1200, 440 + safeCombo * 25);
     const notes = [baseFreq, baseFreq * 1.25, baseFreq * 1.5];
 
     notes.forEach((freq, idx) => {
@@ -382,7 +462,89 @@ class SoundEngine {
     osc.stop(t + 0.18);
   }
 
-  // --- Ambient Background Synth Engine ---
+  // --- Arena Hazard Sound Effects ---
+
+  public playHazardWarning() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const t = this.ctx.currentTime;
+    // Dual high-tech alert pulse (880Hz -> 1174Hz)
+    [0, 0.12].forEach((offset, idx) => {
+      if (!this.ctx || !this.sfxGain) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(idx === 0 ? 880 : 1174.66, t + offset);
+      osc.frequency.exponentialRampToValueAtTime(idx === 0 ? 660 : 880, t + offset + 0.09);
+
+      gain.gain.setValueAtTime(0.18, t + offset);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + offset + 0.09);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+
+      osc.start(t + offset);
+      osc.stop(t + offset + 0.09);
+    });
+  }
+
+  public playElectricShock() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const t = this.ctx.currentTime;
+    // Sizzling electric arc zap
+    const osc = this.ctx.createOscillator();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(140 + Math.random() * 80, t);
+    osc.frequency.linearRampToValueAtTime(320 + Math.random() * 120, t + 0.05);
+    osc.frequency.linearRampToValueAtTime(60, t + 0.14);
+
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1800, t);
+    filter.Q.setValueAtTime(4.0, t);
+
+    gain.gain.setValueAtTime(0.22, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(t);
+    osc.stop(t + 0.14);
+  }
+
+  public playLaserGridActive() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const t = this.ctx.currentTime;
+    // Heavy searing laser beam ignition
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(360, t);
+    osc.frequency.exponentialRampToValueAtTime(180, t + 0.25);
+
+    gain.gain.setValueAtTime(0.26, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(t);
+    osc.stop(t + 0.25);
+  }
 
   public startMusic() {
     if (this.isMusicPlaying) return;
@@ -402,50 +564,56 @@ class SoundEngine {
 
       // Bassline on 8th notes
       if (s % 2 === 0) {
-        const bassFreq = bassNotes[(s / 2) % bassNotes.length];
-        const osc = this.ctx.createOscillator();
-        const filter = this.ctx.createBiquadFilter();
-        const gain = this.ctx.createGain();
+        const bassIndex = Math.floor(s / 2) % bassNotes.length;
+        const bassFreq = bassNotes[bassIndex] ?? 55;
+        if (Number.isFinite(bassFreq) && Number.isFinite(t)) {
+          const osc = this.ctx.createOscillator();
+          const filter = this.ctx.createBiquadFilter();
+          const gain = this.ctx.createGain();
 
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(bassFreq, t);
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(bassFreq, t);
 
-        filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(600, t);
-        filter.frequency.exponentialRampToValueAtTime(120, t + 0.2);
+          filter.type = 'lowpass';
+          filter.frequency.setValueAtTime(600, t);
+          filter.frequency.exponentialRampToValueAtTime(120, t + 0.2);
 
-        gain.gain.setValueAtTime(0.2, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+          gain.gain.setValueAtTime(0.2, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
 
-        osc.connect(filter);
-        filter.connect(gain);
-        gain.connect(this.musicGain);
+          osc.connect(filter);
+          filter.connect(gain);
+          gain.connect(this.musicGain);
 
-        osc.start(t);
-        osc.stop(t + 0.2);
+          osc.start(t);
+          osc.stop(t + 0.2);
+        }
       }
 
       // Synth Arpeggio on 16th notes
       if (s % 4 === 1 || s % 4 === 3) {
-        const leadFreq = leadNotes[(this.musicStep / 2) % leadNotes.length];
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
+        const leadIndex = Math.floor(this.musicStep / 2) % leadNotes.length;
+        const leadFreq = leadNotes[leadIndex] ?? 440;
+        if (Number.isFinite(leadFreq) && Number.isFinite(t)) {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
 
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(leadFreq, t);
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(leadFreq, t);
 
-        gain.gain.setValueAtTime(0.07, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+          gain.gain.setValueAtTime(0.07, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
 
-        osc.connect(gain);
-        gain.connect(this.musicGain);
+          osc.connect(gain);
+          gain.connect(this.musicGain);
 
-        osc.start(t);
-        osc.stop(t + 0.14);
+          osc.start(t);
+          osc.stop(t + 0.14);
+        }
       }
 
       // Hi-hat tick
-      if (s % 2 === 1) {
+      if (s % 2 === 1 && Number.isFinite(t)) {
         const buffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.03, this.ctx.sampleRate);
         const data = buffer.getChannelData(0);
         for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;

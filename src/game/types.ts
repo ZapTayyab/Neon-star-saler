@@ -44,6 +44,16 @@ export interface PlayerStats {
   chainLightning: boolean;
   orbitalDrones: number;
   siphonChance: number;
+  // Sector Progression, Quantum Portal & Customization
+  sectorLevel: number;
+  sectorName: string;
+  portalActive: boolean;
+  portalDistance: number | null;
+  portalAngle: number | null;
+  equippedSkinId: string;
+  // Arena Tactical Hazards
+  hazardCount: number;
+  hazardTelegraphing: boolean;
 }
 
 export interface TelegraphIndicator {

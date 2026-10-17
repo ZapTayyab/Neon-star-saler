@@ -8,18 +8,23 @@ import confetti from 'canvas-confetti';
 import { GameEngine } from './game/engine';
 import { sound } from './game/audio';
 import { GameState, PlayerStats, UpgradeOption } from './game/types';
+import { getSavedSkinId, getSkinById } from './game/skins';
 import { TitleScreen } from './components/TitleScreen';
 import { GameHUD } from './components/GameHUD';
 import { UpgradeModal } from './components/UpgradeModal';
 import { GameOverModal } from './components/GameOverModal';
 import { PauseModal } from './components/PauseModal';
 import { TouchControls } from './components/TouchControls';
+import { MechHangarModal } from './components/MechHangarModal';
 
 export default function App() {
   const mountRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
 
   const [gameState, setGameState] = useState<GameState>('title');
+  const [isHangarOpen, setIsHangarOpen] = useState<boolean>(false);
+  const prevSectorRef = useRef<number>(1);
+
   const [stats, setStats] = useState<PlayerStats>({
     maxHp: 100,
     hp: 100,
@@ -51,6 +56,14 @@ export default function App() {
     chainLightning: false,
     orbitalDrones: 0,
     siphonChance: 0,
+    sectorLevel: 1,
+    sectorName: 'Neon Core',
+    portalActive: false,
+    portalDistance: null,
+    portalAngle: null,
+    equippedSkinId: getSavedSkinId(),
+    hazardCount: 0,
+    hazardTelegraphing: false,
   });
 
   const [bossHpRatio, setBossHpRatio] = useState<number | null>(null);
@@ -60,6 +73,17 @@ export default function App() {
   // Keep references to state callbacks to avoid recreating the engine
   const callbacksRef = useRef({
     onStatsUpdate: (newStats: PlayerStats) => {
+      // Check for sector warp advancement
+      if (newStats.sectorLevel > prevSectorRef.current) {
+        prevSectorRef.current = newStats.sectorLevel;
+        confetti({
+          particleCount: 80,
+          spread: 90,
+          origin: { y: 0.5 },
+          colors: ['#00f0ff', '#f97316', '#a855f7', '#10b981', '#fbbf24'],
+        });
+      }
+
       setStats(newStats);
       if (engineRef.current && engineRef.current.bossHpRatio !== undefined) {
         setBossHpRatio(
@@ -71,7 +95,12 @@ export default function App() {
     },
     onStateChange: (newState: GameState) => {
       setGameState(newState);
-      if (newState === 'playing' && engineRef.current?.playerStats.wave && engineRef.current.playerStats.wave % 5 === 1 && engineRef.current.playerStats.wave > 1) {
+      if (
+        newState === 'playing' &&
+        engineRef.current?.playerStats.wave &&
+        engineRef.current.playerStats.wave % 5 === 1 &&
+        engineRef.current.playerStats.wave > 1
+      ) {
         // Celebrate boss clear with confetti
         confetti({
           particleCount: 60,
@@ -109,7 +138,8 @@ export default function App() {
 
   useEffect(() => {
     const checkTouch = () => {
-      const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024;
+      const hasTouch =
+        'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024;
       setIsTouchDevice(hasTouch);
     };
     checkTouch();
@@ -147,6 +177,7 @@ export default function App() {
 
   const handleStartGame = useCallback(() => {
     if (engineRef.current) {
+      prevSectorRef.current = 1;
       engineRef.current.startGame();
     }
   }, []);
@@ -159,12 +190,14 @@ export default function App() {
 
   const handleRestartGame = useCallback(() => {
     if (engineRef.current) {
+      prevSectorRef.current = 1;
       engineRef.current.startGame();
     }
   }, []);
 
   const handleMenu = useCallback(() => {
     if (engineRef.current) {
+      prevSectorRef.current = 1;
       engineRef.current.resetStats();
       engineRef.current.setGameState('title');
     }
@@ -199,10 +232,22 @@ export default function App() {
     }
   }, []);
 
+  const handleSelectSkin = useCallback((skinId: string) => {
+    if (engineRef.current) {
+      engineRef.current.setMechSkin(skinId);
+      setStats((prev) => ({ ...prev, equippedSkinId: skinId }));
+    }
+  }, []);
+
+  const currentSkin = getSkinById(stats.equippedSkinId);
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-black font-sans select-none touch-none">
       {/* Isolated WebGL Canvas Container */}
-      <div ref={mountRef} className="absolute inset-0 w-full h-full z-0 cursor-crosshair touch-none" />
+      <div
+        ref={mountRef}
+        className="absolute inset-0 w-full h-full z-0 cursor-crosshair touch-none"
+      />
 
       {/* Game Shell Screens & Modals */}
       {gameState === 'title' && (
@@ -210,6 +255,8 @@ export default function App() {
           onStart={handleStartGame}
           isMuted={isMuted}
           onToggleMute={handleToggleMute}
+          onOpenHangar={() => setIsHangarOpen(true)}
+          currentSkinName={currentSkin.name}
         />
       )}
 
@@ -239,10 +286,7 @@ export default function App() {
       )}
 
       {gameState === 'upgrade' && (
-        <UpgradeModal
-          upgrades={availableUpgrades}
-          onSelect={handleSelectUpgrade}
-        />
+        <UpgradeModal upgrades={availableUpgrades} onSelect={handleSelectUpgrade} />
       )}
 
       {gameState === 'paused' && (
@@ -252,14 +296,20 @@ export default function App() {
           onMenu={handleMenu}
           isMuted={isMuted}
           onToggleMute={handleToggleMute}
+          onOpenHangar={() => setIsHangarOpen(true)}
         />
       )}
 
       {gameState === 'gameover' && (
-        <GameOverModal
-          stats={stats}
-          onRestart={handleRestartGame}
-          onMenu={handleMenu}
+        <GameOverModal stats={stats} onRestart={handleRestartGame} onMenu={handleMenu} />
+      )}
+
+      {/* Hover Mech Hangar & Skins Modal */}
+      {isHangarOpen && (
+        <MechHangarModal
+          currentSkinId={stats.equippedSkinId}
+          onSelectSkin={handleSelectSkin}
+          onClose={() => setIsHangarOpen(false)}
         />
       )}
     </div>

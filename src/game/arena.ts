@@ -3,10 +3,93 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 
 export const ARENA_RADIUS = 30;
 
+export interface SectorTheme {
+  level: number;
+  name: string;
+  subtitle: string;
+  accentColor: number;
+  floorHex: string;
+  bgColor: number;
+  lightKeyColor: number;
+  lightSkyColor: number;
+  pylonColor: number;
+}
+
+export const SECTOR_THEMES: Record<number, SectorTheme> = {
+  1: {
+    level: 1,
+    name: 'Neon Core',
+    subtitle: 'Sector 01 // Sub-Grid Foundry',
+    accentColor: 0x00f0ff,
+    floorHex: '#00f0ff',
+    bgColor: 0x06080e,
+    lightKeyColor: 0xfff5e6,
+    lightSkyColor: 0x38bdf8,
+    pylonColor: 0x00f0ff,
+  },
+  2: {
+    level: 2,
+    name: 'Magma Bastion',
+    subtitle: 'Sector 02 // Molten Reactor',
+    accentColor: 0xf97316,
+    floorHex: '#f97316',
+    bgColor: 0x140606,
+    lightKeyColor: 0xffedd5,
+    lightSkyColor: 0xf87171,
+    pylonColor: 0xff3b30,
+  },
+  3: {
+    level: 3,
+    name: 'Void Matrix',
+    subtitle: 'Sector 03 // Abyssal Singularity',
+    accentColor: 0xa855f7,
+    floorHex: '#a855f7',
+    bgColor: 0x0c0418,
+    lightKeyColor: 0xf3e8ff,
+    lightSkyColor: 0xc084fc,
+    pylonColor: 0xd946ef,
+  },
+  4: {
+    level: 4,
+    name: 'Acid Synthetics',
+    subtitle: 'Sector 04 // Bio-Hazard Lab',
+    accentColor: 0x10b981,
+    floorHex: '#10b981',
+    bgColor: 0x02120a,
+    lightKeyColor: 0xd1fae5,
+    lightSkyColor: 0x34d399,
+    pylonColor: 0x10b981,
+  },
+  5: {
+    level: 5,
+    name: 'Chrono Sanctum',
+    subtitle: 'Sector 05 // Apex Horizon',
+    accentColor: 0xf59e0b,
+    floorHex: '#fbbf24',
+    bgColor: 0x120d02,
+    lightKeyColor: 0xfffbeb,
+    lightSkyColor: 0xfde68a,
+    pylonColor: 0xfbbf24,
+  },
+};
+
+export function getSectorTheme(level: number): SectorTheme {
+  const normalizedLevel = ((level - 1) % 5) + 1;
+  const base = SECTOR_THEMES[normalizedLevel] || SECTOR_THEMES[1];
+  return {
+    ...base,
+    level,
+    name: level > 5 ? `${base.name} (Tier ${Math.floor((level - 1) / 5) + 1})` : base.name,
+  };
+}
+
 /**
- * Creates a procedural high-tech cyberpunk arena floor grid texture
+ * Creates a procedural high-tech cyberpunk arena floor grid texture with custom accent color
  */
-export function createArenaFloorTexture(renderer: THREE.WebGLRenderer): THREE.CanvasTexture {
+export function createArenaFloorTexture(
+  renderer: THREE.WebGLRenderer,
+  accentHex: string = '#00f0ff'
+): { canvas: HTMLCanvasElement; texture: THREE.CanvasTexture } {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
   canvas.height = 1024;
@@ -34,8 +117,8 @@ export function createArenaFloorTexture(renderer: THREE.WebGLRenderer): THREE.Ca
     ctx.stroke();
   }
 
-  // Major accent grid lines with subtle cyan glow
-  ctx.strokeStyle = '#00f0ff';
+  // Major accent grid lines with accent glow
+  ctx.strokeStyle = accentHex;
   ctx.lineWidth = 3;
   ctx.globalAlpha = 0.35;
   for (let x = 0; x <= 1024; x += tileSize * 4) {
@@ -67,7 +150,7 @@ export function createArenaFloorTexture(renderer: THREE.WebGLRenderer): THREE.Ca
   texture.repeat.set(4, 4);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  return texture;
+  return { canvas, texture };
 }
 
 export interface ArenaComponents {
@@ -76,10 +159,11 @@ export interface ArenaComponents {
   barrierMesh: THREE.Mesh;
   dustParticles: THREE.Points;
   update: (time: number) => void;
+  setSector: (level: number) => void;
 }
 
 export function buildArena(scene: THREE.Scene, renderer: THREE.WebGLRenderer): ArenaComponents {
-  // 1. Studio RoomEnvironment Reflection (Mandatory per Three.js skill)
+  // 1. Studio RoomEnvironment Reflection
   const pmremGenerator = new THREE.PMREMGenerator(renderer);
   scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
   pmremGenerator.dispose();
@@ -90,7 +174,7 @@ export function buildArena(scene: THREE.Scene, renderer: THREE.WebGLRenderer): A
   scene.fog = new THREE.FogExp2(0x06080e, 0.015);
 
   // 3. Balanced Lighting Rig (Warm key directional + Cool hemisphere sky/ground)
-  const dirLight = new THREE.DirectionalLight(0xfff5e6, 2.0); // Warm key light
+  const dirLight = new THREE.DirectionalLight(0xfff5e6, 2.0);
   dirLight.position.set(25, 45, 20);
   dirLight.castShadow = true;
   dirLight.shadow.mapSize.width = 2048;
@@ -111,16 +195,16 @@ export function buildArena(scene: THREE.Scene, renderer: THREE.WebGLRenderer): A
   hemiLight.position.set(0, 50, 0);
   scene.add(hemiLight);
 
-  // Subtle accent rim light
+  // Accent rim light
   const rimLight = new THREE.DirectionalLight(0x818cf8, 0.8);
   rimLight.position.set(-25, 20, -25);
   scene.add(rimLight);
 
-  // 4. Extended Floor Plane (Beyond playable zone to horizon)
-  const floorTexture = createArenaFloorTexture(renderer);
+  // 4. Extended Floor Plane
+  let floorData = createArenaFloorTexture(renderer, '#00f0ff');
   const floorGeo = new THREE.PlaneGeometry(160, 160);
   const floorMat = new THREE.MeshStandardMaterial({
-    map: floorTexture,
+    map: floorData.texture,
     roughness: 0.7,
     metalness: 0.3,
   });
@@ -188,7 +272,7 @@ export function buildArena(scene: THREE.Scene, renderer: THREE.WebGLRenderer): A
   barrierMesh.position.y = 1.75;
   scene.add(barrierMesh);
 
-  // 6. Monolithic Distant Horizon Towers (adds cyber scale)
+  // 6. Monolithic Distant Horizon Towers
   const distantGroup = new THREE.Group();
   const towerMat = new THREE.MeshStandardMaterial({
     color: 0x090d16,
@@ -227,7 +311,6 @@ export function buildArena(scene: THREE.Scene, renderer: THREE.WebGLRenderer): A
   scene.add(dustParticles);
 
   const update = (time: number) => {
-    // Subtle rotation of perimeter barrier & dust drift
     barrierMesh.rotation.y = time * 0.05;
     const posAttr = dustParticles.geometry.attributes.position as THREE.BufferAttribute;
     const arr = posAttr.array as Float32Array;
@@ -237,5 +320,32 @@ export function buildArena(scene: THREE.Scene, renderer: THREE.WebGLRenderer): A
     posAttr.needsUpdate = true;
   };
 
-  return { floorMesh, pylons, barrierMesh, dustParticles, update };
+  const setSector = (level: number) => {
+    const theme = getSectorTheme(level);
+
+    // Update scene background and fog
+    (scene.background as THREE.Color).setHex(theme.bgColor);
+    if (scene.fog) {
+      (scene.fog as THREE.FogExp2).color.setHex(theme.bgColor);
+    }
+
+    // Update lighting atmosphere
+    dirLight.color.setHex(theme.lightKeyColor);
+    hemiLight.color.setHex(theme.lightSkyColor);
+    rimLight.color.setHex(theme.accentColor);
+
+    // Update pylon beacons and energy barrier
+    beaconMat.color.setHex(theme.pylonColor);
+    beaconMat.emissive.setHex(theme.pylonColor);
+    barrierMat.color.setHex(theme.accentColor);
+    particleMat.color.setHex(theme.accentColor);
+
+    // Recreate floor canvas with sector accent color
+    const newFloor = createArenaFloorTexture(renderer, theme.floorHex);
+    floorMat.map?.dispose();
+    floorMat.map = newFloor.texture;
+    floorMat.needsUpdate = true;
+  };
+
+  return { floorMesh, pylons, barrierMesh, dustParticles, update, setSector };
 }

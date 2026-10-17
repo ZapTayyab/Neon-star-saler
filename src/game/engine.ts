@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ARENA_RADIUS, buildArena } from './arena';
+import { ARENA_RADIUS, buildArena, getSectorTheme } from './arena';
 import { sound } from './audio';
 import {
   createColossusBoss,
@@ -10,7 +10,10 @@ import {
   createVectorDrone,
   materials,
 } from './models';
+import { HazardManager } from './hazards';
 import { ParticleManager } from './particles';
+import { QuantumPortal } from './portal';
+import { applySkinToMech, getSavedSkinId, getSkinById, MechSkin, saveSkinId } from './skins';
 import { EnemyType, GameState, PlayerStats, UpgradeOption } from './types';
 
 // Pre-allocated math objects to avoid garbage collection
@@ -195,8 +198,33 @@ export class GameEngine {
   private hasVirtualAim: boolean = false;
   private hasMouseAim: boolean = true;
   private virtualFiring: boolean = false;
-  public autoFire: boolean = false; // Default to manual control
+  public autoFire: boolean = false;
   private reticleMesh!: THREE.Mesh;
+  private reticleGroup!: THREE.Group;
+  private reticleOuterRing!: THREE.Mesh;
+  private reticleCenterDot!: THREE.Mesh;
+  private reticleBrackets!: THREE.LineSegments;
+  private reticleMaterial!: THREE.MeshBasicMaterial;
+  private aimLaserLine!: THREE.Line;
+  private aimLaserMaterial!: THREE.LineBasicMaterial;
+  private isAimLockedOn: boolean = false;
+
+  // Quantum Portal & Sector Level Progression
+  public quantumPortal: QuantumPortal;
+  public currentSkin: MechSkin;
+  private isWarpingLevel: boolean = false;
+  private warpTransitionTimer: number = 0;
+
+  // Localized Arena Hazards (Electrified Floor Tiles & Laser Grids)
+  public hazardManager: HazardManager;
+
+  // Kinetic Dash High-Contrast Trail Tracking
+  private prevThrusterLX: number = 0;
+  private prevThrusterLY: number = 0;
+  private prevThrusterLZ: number = 0;
+  private prevThrusterRX: number = 0;
+  private prevThrusterRY: number = 0;
+  private prevThrusterRZ: number = 0;
 
   // Entities
   private projectiles: Projectile[] = [];
@@ -266,6 +294,14 @@ export class GameEngine {
     this.playerModel = createPlayerMech();
     this.scene.add(this.playerModel.group);
 
+    // Initialize Quantum Warp Portal and Hover Mech Skins
+    this.quantumPortal = new QuantumPortal(this.scene);
+    this.currentSkin = getSkinById(getSavedSkinId());
+    applySkinToMech(this.playerModel, this.currentSkin);
+
+    // Initialize Localized Arena Hazards
+    this.hazardManager = new HazardManager(this.scene, this.particleManager);
+
     // Initial stats
     this.playerStats = {
       maxHp: 100,
@@ -298,22 +334,78 @@ export class GameEngine {
       chainLightning: false,
       orbitalDrones: 0,
       siphonChance: 0,
+      // Sector Level, Quantum Portal & Mech Skin
+      sectorLevel: 1,
+      sectorName: 'Neon Core',
+      portalActive: false,
+      portalDistance: null,
+      portalAngle: null,
+      equippedSkinId: this.currentSkin.id,
+      hazardCount: 0,
+      hazardTelegraphing: false,
     };
 
-    // Holographic target reticle on ground for targeted enemy
-    const reticleGeo = new THREE.RingGeometry(0.8, 1.05, 16);
-    reticleGeo.rotateX(-Math.PI / 2);
-    const reticleMat = new THREE.MeshBasicMaterial({
+    // Holographic target reticle and laser sight guide on ground
+    this.reticleGroup = new THREE.Group();
+    this.reticleGroup.position.y = 0.04;
+    this.reticleGroup.visible = false;
+
+    this.reticleMaterial = new THREE.MeshBasicMaterial({
       color: 0x00f0ff,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.85,
       depthWrite: false,
       side: THREE.DoubleSide,
     });
-    this.reticleMesh = new THREE.Mesh(reticleGeo, reticleMat);
-    this.reticleMesh.position.y = 0.05;
-    this.reticleMesh.visible = false;
-    this.scene.add(this.reticleMesh);
+
+    const reticleGeo = new THREE.RingGeometry(0.7, 0.88, 32);
+    reticleGeo.rotateX(-Math.PI / 2);
+    this.reticleOuterRing = new THREE.Mesh(reticleGeo, this.reticleMaterial);
+    this.reticleMesh = this.reticleOuterRing;
+    this.reticleGroup.add(this.reticleOuterRing);
+
+    const dotGeo = new THREE.CircleGeometry(0.1, 16);
+    dotGeo.rotateX(-Math.PI / 2);
+    this.reticleCenterDot = new THREE.Mesh(dotGeo, this.reticleMaterial);
+    this.reticleGroup.add(this.reticleCenterDot);
+
+    const bracketPoints: THREE.Vector3[] = [
+      new THREE.Vector3(-1.15, 0.01, 0),
+      new THREE.Vector3(-0.4, 0.01, 0),
+      new THREE.Vector3(0.4, 0.01, 0),
+      new THREE.Vector3(1.15, 0.01, 0),
+      new THREE.Vector3(0, 0.01, -1.15),
+      new THREE.Vector3(0, 0.01, -0.4),
+      new THREE.Vector3(0, 0.01, 0.4),
+      new THREE.Vector3(0, 0.01, 1.15),
+    ];
+    const bracketGeo = new THREE.BufferGeometry().setFromPoints(bracketPoints);
+    this.reticleBrackets = new THREE.LineSegments(
+      bracketGeo,
+      new THREE.LineBasicMaterial({
+        color: 0x00f0ff,
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    this.reticleGroup.add(this.reticleBrackets);
+    this.scene.add(this.reticleGroup);
+
+    // Dynamic Aim Guide Laser Line connecting mech cannons to reticle target
+    const laserGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0.55, 0),
+      new THREE.Vector3(0, 0.05, -10),
+    ]);
+    this.aimLaserMaterial = new THREE.LineBasicMaterial({
+      color: 0x00f0ff,
+      transparent: true,
+      opacity: 0.32,
+      blending: THREE.AdditiveBlending,
+    });
+    this.aimLaserLine = new THREE.Line(laserGeo, this.aimLaserMaterial);
+    this.aimLaserLine.visible = false;
+    this.scene.add(this.aimLaserLine);
 
     // Pre-warm WebGL shaders per Three.js guidelines
     this.renderer.compile(this.scene, this.camera);
@@ -355,10 +447,10 @@ export class GameEngine {
     window.addEventListener('keydown', this.handleKeyDown);
     window.addEventListener('keyup', this.handleKeyUp);
     window.addEventListener('blur', this.handleBlur);
-    this.container.addEventListener('pointermove', this.handlePointerMove);
-    this.container.addEventListener('pointerdown', this.handlePointerDown);
-    this.container.addEventListener('pointerup', this.handlePointerUp);
-    this.container.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('pointermove', this.handlePointerMove);
+    window.addEventListener('pointerdown', this.handlePointerDown);
+    window.addEventListener('pointerup', this.handlePointerUp);
+    window.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('resize', this.handleResize);
   }
 
@@ -400,16 +492,7 @@ export class GameEngine {
     this.isPointerDown = false;
   };
 
-  private handlePointerMove = (e: PointerEvent) => {
-    if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
-      this.hasMouseAim = true;
-      this.hasVirtualAim = false;
-    }
-
-    const rect = this.container.getBoundingClientRect();
-    this.pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    this.pointerNdc.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
-
+  public updateAimFromPointer = () => {
     _raycaster.setFromCamera(this.pointerNdc, this.camera);
     const hitPoint = _v1;
     if (_raycaster.ray.intersectPlane(_groundPlane, hitPoint)) {
@@ -418,8 +501,36 @@ export class GameEngine {
     }
   };
 
+  private handlePointerMove = (e: PointerEvent) => {
+    if (e.pointerType === 'mouse' || e.pointerType === 'pen' || e.pointerType === '') {
+      this.hasMouseAim = true;
+      this.hasVirtualAim = false;
+    }
+
+    if (!this.container) return;
+    const rect = this.container.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      this.pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      this.pointerNdc.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      this.updateAimFromPointer();
+    }
+  };
+
   private handlePointerDown = (e: PointerEvent) => {
     sound.unlock();
+    if (e.pointerType === 'mouse' || e.pointerType === 'pen' || e.pointerType === '') {
+      this.hasMouseAim = true;
+      this.hasVirtualAim = false;
+    }
+
+    if (!this.container) return;
+    const rect = this.container.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      this.pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      this.pointerNdc.y = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      this.updateAimFromPointer();
+    }
+
     if (e.button === 0) {
       this.isPointerDown = true;
     } else if (e.button === 2) {
@@ -479,6 +590,14 @@ export class GameEngine {
     this.startWave(1);
   }
 
+  public setMechSkin(skinId: string) {
+    this.currentSkin = getSkinById(skinId);
+    saveSkinId(skinId);
+    applySkinToMech(this.playerModel, this.currentSkin);
+    this.playerStats.equippedSkinId = skinId;
+    this.onStatsUpdate({ ...this.playerStats });
+  }
+
   public resetStats() {
     this.playerStats.hp = this.playerStats.maxHp;
     this.playerStats.shield = this.playerStats.maxShield;
@@ -488,6 +607,13 @@ export class GameEngine {
     this.playerStats.combo = 0;
     this.playerStats.comboTimer = 0;
     this.playerStats.wave = 1;
+    this.playerStats.sectorLevel = 1;
+    this.playerStats.sectorName = 'Neon Core';
+    this.playerStats.portalActive = false;
+    this.playerStats.portalDistance = null;
+    this.playerStats.portalAngle = null;
+    this.playerStats.hazardCount = 0;
+    this.playerStats.hazardTelegraphing = false;
     this.playerStats.xp = 0;
     this.playerStats.xpToNextLevel = 100;
     this.playerStats.level = 1;
@@ -501,6 +627,10 @@ export class GameEngine {
     this.trauma = 0;
     this.hitstopTimer = 0;
     this.titleCinematicAngle = 0;
+    this.isWarpingLevel = false;
+    this.quantumPortal.despawn();
+    this.hazardManager.clear();
+    this.arena.setSector(1);
     this.playerModel.group.position.set(0, 0.6, 0);
     this.playerModel.group.rotation.set(0, 0, 0);
 
@@ -522,6 +652,7 @@ export class GameEngine {
     this.pickups.forEach((p) => this.scene.remove(p.group));
     this.pickups = [];
 
+    this.hazardManager.clear();
     this.bossEntity = null;
   }
 
@@ -556,6 +687,58 @@ export class GameEngine {
         this.waveEnemiesToSpawn.push({ type: 'sniper', delay: 3.0 + i * 2.0 });
       }
     }
+  }
+
+  public spawnQuantumPortal() {
+    if (this.quantumPortal.isActive) return;
+    const nextSectorLevel = this.playerStats.sectorLevel + 1;
+    const nextTheme = getSectorTheme(nextSectorLevel);
+    this.quantumPortal.spawn(0, -3, nextSectorLevel, nextTheme.accentColor);
+    sound.playPortalSpawn();
+    this.playerStats.portalActive = true;
+    this.playerStats.portalDistance = Math.round(
+      this.quantumPortal.getDistance(this.playerX, this.playerZ)
+    );
+    this.playerStats.portalAngle = this.quantumPortal.getAngle(this.playerX, this.playerZ);
+    this.onStatsUpdate({ ...this.playerStats });
+  }
+
+  public startWarpJump() {
+    this.isWarpingLevel = true;
+    this.warpTransitionTimer = 0;
+    this.quantumPortal.triggerWarp();
+    sound.playPortalWarp();
+    triggerHaptic(80);
+    this.addTrauma(0.6);
+  }
+
+  public advanceToNextSector() {
+    this.isWarpingLevel = false;
+    this.quantumPortal.despawn();
+    this.hazardManager.clear();
+
+    this.playerStats.sectorLevel += 1;
+    const theme = getSectorTheme(this.playerStats.sectorLevel);
+    this.playerStats.sectorName = theme.name;
+    this.playerStats.score += 3000 * this.playerStats.sectorLevel;
+    this.playerStats.portalActive = false;
+    this.playerStats.portalDistance = null;
+    this.playerStats.portalAngle = null;
+
+    // Environmental sector transition
+    this.arena.setSector(this.playerStats.sectorLevel);
+
+    // Position player safely near entrance of new sector
+    this.playerX = 0;
+    this.playerZ = 8;
+    this.playerVx = 0;
+    this.playerVz = 0;
+
+    // Trigger sector clear upgrade reward!
+    this.triggerUpgradeSelection();
+
+    // Start next wave
+    this.startWave(this.playerStats.wave + 1);
   }
 
   private spawnEnemy(type: EnemyType) {
@@ -706,16 +889,20 @@ export class GameEngine {
 
     spreadAngles.forEach((offsetAngle) => {
       const angle = baseAngle + offsetAngle;
-      const speed = 40;
-      const vx = Math.sin(angle) * speed;
-      const vz = Math.cos(angle) * speed;
+      const speed = 42;
+      const vx = -Math.sin(angle) * speed;
+      const vz = -Math.cos(angle) * speed;
 
       // Create glowing projectile mesh
       const geo = new THREE.CylinderGeometry(bulletRadius, bulletRadius, 0.95, 6);
       geo.rotateX(Math.PI / 2);
       const mat = new THREE.MeshBasicMaterial({ color: bulletColor });
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(this.playerX + Math.sin(angle) * 0.8, 0.55, this.playerZ + Math.cos(angle) * 0.8);
+      mesh.position.set(
+        this.playerX - Math.sin(angle) * 0.9,
+        0.55,
+        this.playerZ - Math.cos(angle) * 0.9
+      );
       mesh.rotation.y = angle;
       this.scene.add(mesh);
 
@@ -801,8 +988,29 @@ export class GameEngine {
       this.playerVz = (dz / dlen) * 36;
     }
 
-    // Ghost dash trail particles
-    this.particleManager.spawn(this.playerX, 0.5, this.playerZ, 25, 0x00f0ff, 4, 0.6, 0.3);
+    // Initialize thruster tracking coordinates for continuous trail
+    this.playerModel.thrusterL.getWorldPosition(_v1);
+    this.playerModel.thrusterR.getWorldPosition(_v2);
+    this.prevThrusterLX = _v1.x;
+    this.prevThrusterLY = _v1.y;
+    this.prevThrusterLZ = _v1.z;
+    this.prevThrusterRX = _v2.x;
+    this.prevThrusterRY = _v2.y;
+    this.prevThrusterRZ = _v2.z;
+
+    // High-contrast neon-blue trail burst on dash initiation
+    const trailColor = this.currentSkin?.colors?.trail || 0x00f0ff;
+    this.particleManager.spawnDashTrail(
+      _v1.x,
+      _v1.y,
+      _v1.z,
+      _v2.x,
+      _v2.y,
+      _v2.z,
+      this.playerVx,
+      this.playerVz,
+      trailColor
+    );
     this.addTrauma(0.2);
   }
 
@@ -1199,9 +1407,16 @@ export class GameEngine {
       this.playerZ = (this.playerZ / distFromCenter) * maxBound;
     }
 
-    // --- Smart Targeting & Aiming (Mobile Auto-Aim & Reticle) ---
+    // --- Smart Targeting & Aiming (Continuous Cursor Tracking & Reticle) ---
+    if (this.hasMouseAim) {
+      this.updateAimFromPointer();
+    }
+
     let nearestEnemy: EnemyEntity | null = null;
     let minEnemyDist = 32.0;
+    let hoveredEnemy: EnemyEntity | null = null;
+    let minHoverDist = 2.5;
+
     for (let i = 0; i < this.enemies.length; i++) {
       const e = this.enemies[i];
       const dist = Math.hypot(e.x - this.playerX, e.z - this.playerZ);
@@ -1210,32 +1425,39 @@ export class GameEngine {
         minEnemyDist = weightedDist;
         nearestEnemy = e;
       }
+
+      // Check if mouse cursor / aim target is hovering over or targeting this enemy
+      const distFromAim = Math.hypot(e.x - this.aimTargetX, e.z - this.aimTargetZ);
+      if (distFromAim < e.radius + 1.2 && distFromAim < minHoverDist) {
+        minHoverDist = distFromAim;
+        hoveredEnemy = e;
+      }
     }
 
     let targetRot = this.playerRot;
 
     if (this.hasVirtualAim && Math.hypot(this.virtualAimX, this.virtualAimZ) > 0.05) {
       // 1. Right virtual stick has active input
-      targetRot = Math.atan2(this.virtualAimX, this.virtualAimZ);
+      targetRot = Math.atan2(-this.virtualAimX, -this.virtualAimZ);
       this.aimTargetX = this.playerX + this.virtualAimX * 14;
       this.aimTargetZ = this.playerZ + this.virtualAimZ * 14;
     } else if (this.hasMouseAim) {
-      // 2. Mouse aiming on desktop (always tracks mouse cursor smoothly, independent of WASD!)
+      // 2. Mouse aiming on desktop: continuously tracks mouse cursor with precision
       const aimDx = this.aimTargetX - this.playerX;
       const aimDz = this.aimTargetZ - this.playerZ;
-      if (Math.hypot(aimDx, aimDz) > 0.3) {
-        targetRot = Math.atan2(aimDx, aimDz);
+      if (Math.hypot(aimDx, aimDz) > 0.25) {
+        targetRot = Math.atan2(-aimDx, -aimDz);
       }
     } else if (this.autoFire && nearestEnemy) {
       // 3. Auto-lock onto nearest target ONLY if user enabled Auto-Mode
       const aimDx = nearestEnemy.x - this.playerX;
       const aimDz = nearestEnemy.z - this.playerZ;
-      targetRot = Math.atan2(aimDx, aimDz);
+      targetRot = Math.atan2(-aimDx, -aimDz);
       this.aimTargetX = nearestEnemy.x;
       this.aimTargetZ = nearestEnemy.z;
     } else if (inputLen > 0.05) {
       // 4. Moving without explicit aiming: mech smoothly faces direction of travel
-      targetRot = Math.atan2(moveInputX, moveInputZ);
+      targetRot = Math.atan2(-moveInputX, -moveInputZ);
       this.aimTargetX = this.playerX + moveInputX * 10;
       this.aimTargetZ = this.playerZ + moveInputZ * 10;
     }
@@ -1245,16 +1467,57 @@ export class GameEngine {
     while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
 
-    const rotSpeed = this.hasVirtualAim ? 22 : this.hasMouseAim ? 26 : 14;
+    const rotSpeed = this.hasVirtualAim ? 26 : this.hasMouseAim ? 38 : 16;
     this.playerRot += angleDiff * (1 - Math.exp(-rotSpeed * dt));
 
-    // Update holographic reticle only when auto-aim is on and tracking
-    if (this.autoFire && nearestEnemy) {
-      this.reticleMesh.position.set(nearestEnemy.x, 0.05, nearestEnemy.z);
-      this.reticleMesh.rotation.z = time * 2.5;
-      this.reticleMesh.visible = true;
+    // Update holographic reticle and laser sight guide
+    const isPlaying = this.gameState === 'playing' && !this.isWarpingLevel;
+    const shouldShowAim =
+      isPlaying &&
+      (this.hasMouseAim || this.hasVirtualAim || (this.autoFire && nearestEnemy !== null));
+
+    if (shouldShowAim) {
+      const targetPos = hoveredEnemy
+        ? { x: hoveredEnemy.x, z: hoveredEnemy.z }
+        : { x: this.aimTargetX, z: this.aimTargetZ };
+
+      this.reticleGroup.position.set(targetPos.x, 0.04, targetPos.z);
+      this.reticleGroup.visible = true;
+
+      const isLocked = hoveredEnemy !== null || (this.autoFire && nearestEnemy !== null);
+      this.isAimLockedOn = isLocked;
+
+      const skinTrim = this.currentSkin?.colors?.trim || 0x00f0ff;
+      const activeColor = isLocked ? 0xff2a55 : skinTrim;
+
+      this.reticleMaterial.color.setHex(activeColor);
+      (this.reticleBrackets.material as THREE.LineBasicMaterial).color.setHex(activeColor);
+
+      this.reticleOuterRing.rotation.z = time * (isLocked ? 3.5 : 2.0);
+      this.reticleBrackets.rotation.y = -time * (isLocked ? 3.5 : 2.0);
+      const reticleScale = isLocked
+        ? 1.25 + Math.sin(time * 16) * 0.1
+        : 1.0 + Math.sin(time * 4) * 0.05;
+      this.reticleGroup.scale.setScalar(reticleScale);
+
+      // Aim Guide Laser Line connecting mech cannons to reticle target
+      this.aimLaserLine.visible = true;
+      const muzzleX = this.playerX - Math.sin(this.playerRot) * 0.85;
+      const muzzleZ = this.playerZ - Math.cos(this.playerRot) * 0.85;
+      const positions = (this.aimLaserLine.geometry.attributes.position as THREE.BufferAttribute).array as Float32Array;
+      positions[0] = muzzleX;
+      positions[1] = 0.55;
+      positions[2] = muzzleZ;
+      positions[3] = targetPos.x;
+      positions[4] = 0.06;
+      positions[5] = targetPos.z;
+      this.aimLaserLine.geometry.attributes.position.needsUpdate = true;
+
+      this.aimLaserMaterial.color.setHex(activeColor);
+      this.aimLaserMaterial.opacity = isLocked ? 0.65 : 0.28;
     } else {
-      this.reticleMesh.visible = false;
+      this.reticleGroup.visible = false;
+      this.aimLaserLine.visible = false;
     }
 
     // Apply model transforms with hover bobbing & bank roll
@@ -1273,9 +1536,46 @@ export class GameEngine {
 
     // Thruster flame dynamics
     const thrustScale =
-      this.playerStats.isDashing ? 2.5 : inputLen > 0.1 ? 1.3 + Math.sin(time * 25) * 0.2 : 0.8;
+      this.playerStats.isDashing ? 3.0 : inputLen > 0.1 ? 1.3 + Math.sin(time * 25) * 0.2 : 0.8;
     this.playerModel.thrusterL.scale.set(1, thrustScale, 1);
     this.playerModel.thrusterR.scale.set(1, thrustScale, 1);
+
+    // Continuous High-Contrast Neon-Blue Particle Trail on Kinetic Dash
+    this.playerModel.thrusterL.getWorldPosition(_v1);
+    this.playerModel.thrusterR.getWorldPosition(_v2);
+
+    if (this.playerStats.isDashing) {
+      const trailColor = this.currentSkin?.colors?.trail || 0x00f0ff;
+      const subSteps = 3;
+      for (let s = 1; s <= subSteps; s++) {
+        const alpha = s / subSteps;
+        const lx = THREE.MathUtils.lerp(this.prevThrusterLX || _v1.x, _v1.x, alpha);
+        const ly = THREE.MathUtils.lerp(this.prevThrusterLY || _v1.y, _v1.y, alpha);
+        const lz = THREE.MathUtils.lerp(this.prevThrusterLZ || _v1.z, _v1.z, alpha);
+
+        const rx = THREE.MathUtils.lerp(this.prevThrusterRX || _v2.x, _v2.x, alpha);
+        const ry = THREE.MathUtils.lerp(this.prevThrusterRY || _v2.y, _v2.y, alpha);
+        const rz = THREE.MathUtils.lerp(this.prevThrusterRZ || _v2.z, _v2.z, alpha);
+
+        this.particleManager.spawnDashTrail(
+          lx,
+          ly,
+          lz,
+          rx,
+          ry,
+          rz,
+          this.playerVx,
+          this.playerVz,
+          trailColor
+        );
+      }
+    }
+    this.prevThrusterLX = _v1.x;
+    this.prevThrusterLY = _v1.y;
+    this.prevThrusterLZ = _v1.z;
+    this.prevThrusterRX = _v2.x;
+    this.prevThrusterRY = _v2.y;
+    this.prevThrusterRZ = _v2.z;
 
     // Core rotation
     this.playerModel.core.rotation.y = time * 4.0;
@@ -1326,6 +1626,34 @@ export class GameEngine {
       }
     }
 
+    // --- Quantum Warp Portal & Sector Level Progression ---
+    if (this.quantumPortal.isActive) {
+      this.quantumPortal.update(dt, time, this.particleManager);
+
+      const pDist = this.quantumPortal.getDistance(this.playerX, this.playerZ);
+      const pAngle = this.quantumPortal.getAngle(this.playerX, this.playerZ);
+      this.playerStats.portalActive = true;
+      this.playerStats.portalDistance = Math.round(pDist);
+      this.playerStats.portalAngle = pAngle;
+
+      // Check if player hovers into the Quantum Warp Portal
+      if (this.quantumPortal.checkEnter(this.playerX, this.playerZ) && !this.isWarpingLevel) {
+        this.startWarpJump();
+      }
+    }
+
+    // Warp sequence handling
+    if (this.isWarpingLevel) {
+      this.warpTransitionTimer += dt;
+      this.playerX = THREE.MathUtils.lerp(this.playerX, this.quantumPortal.x, 8 * dt);
+      this.playerZ = THREE.MathUtils.lerp(this.playerZ, this.quantumPortal.z, 8 * dt);
+      this.particleManager.spawnPortalSwirl(this.playerX, 1.0, this.playerZ, 2.0, 0x00f0ff);
+
+      if (this.warpTransitionTimer >= 0.45) {
+        this.advanceToNextSector();
+      }
+    }
+
     // --- Wave Director Spawn Tick ---
     this.waveTimer += dt;
     for (let i = this.waveEnemiesToSpawn.length - 1; i >= 0; i--) {
@@ -1336,16 +1664,43 @@ export class GameEngine {
       }
     }
 
-    // Wave Completion Check
+    // Wave & Sector Completion Check
     if (this.waveEnemiesToSpawn.length === 0 && this.enemies.length === 0) {
-      // Wave cleared! Trigger perk upgrade & progress
-      this.playerStats.score += 500 * this.playerStats.wave;
-      this.startWave(this.playerStats.wave + 1);
-      this.triggerUpgradeSelection();
+      // Sector level clearance: every 2 waves triggers the Quantum Portal!
+      const isSectorClear = this.playerStats.wave % 2 === 0;
+
+      if (isSectorClear) {
+        // Sector cleared! Spawn Quantum Warp Portal to advance to the next level
+        if (!this.quantumPortal.isActive && !this.isWarpingLevel) {
+          this.spawnQuantumPortal();
+        }
+      } else {
+        // Inter-sector wave progression
+        this.playerStats.score += 500 * this.playerStats.wave;
+        this.startWave(this.playerStats.wave + 1);
+        this.triggerUpgradeSelection();
+      }
     }
 
     // --- Update Enemies with Telegraphed Behaviors ---
     this.updateEnemies(dt, time);
+
+    // --- Update Localized Arena Hazards (Electrified Tiles & Laser Grids) ---
+    this.hazardManager.update(
+      dt,
+      time,
+      { x: this.playerX, z: this.playerZ, isDashing: this.playerStats.isDashing },
+      (damage) => this.damagePlayer(damage),
+      (enemy: EnemyEntity, damage: number, hitX?: number, hitY?: number, hitZ?: number) =>
+        this.damageEnemy(enemy, damage, hitX, hitY, hitZ),
+      this.enemies,
+      this.playerStats.wave,
+      this.playerStats.sectorLevel,
+      this.gameState === 'playing' && !this.isWarpingLevel
+    );
+
+    this.playerStats.hazardCount = this.hazardManager.getActiveCount();
+    this.playerStats.hazardTelegraphing = this.hazardManager.getTelegraphingCount() > 0;
 
     // --- Update Projectiles ---
     this.updateProjectiles(dt);
@@ -1411,7 +1766,7 @@ export class GameEngine {
       if (enemy.type === 'stalker') {
         // Stalker: Chases close, then enters 0.7s telegraphed windup, then lunges at 28 speed!
         if (enemy.state === 'chase') {
-          enemy.rotation = Math.atan2(dx, dz);
+          enemy.rotation = Math.atan2(-dx, -dz);
           enemy.vx = (dx / (dist || 1)) * enemy.speed;
           enemy.vz = (dz / (dist || 1)) * enemy.speed;
 
@@ -1426,7 +1781,7 @@ export class GameEngine {
           // Decelerate and lock on
           enemy.vx *= 0.85;
           enemy.vz *= 0.85;
-          enemy.rotation = Math.atan2(dx, dz);
+          enemy.rotation = Math.atan2(-dx, -dz);
 
           // Eye flares intense red
           if (enemy.subParts?.eye) {
@@ -1436,10 +1791,9 @@ export class GameEngine {
           if (enemy.timer >= enemy.windupDuration) {
             enemy.state = 'attack';
             enemy.timer = 0;
-            // High speed lunge vector
-            const lungeAngle = enemy.rotation;
-            enemy.vx = Math.sin(lungeAngle) * 26;
-            enemy.vz = Math.cos(lungeAngle) * 26;
+            // High speed lunge vector towards player
+            enemy.vx = (dx / (dist || 1)) * 26;
+            enemy.vz = (dz / (dist || 1)) * 26;
             this.particleManager.spawn(enemy.x, 0.5, enemy.z, 15, 0xff3b30, 8, 0.4, 0.2);
           }
         } else if (enemy.state === 'attack') {
@@ -1467,7 +1821,7 @@ export class GameEngine {
         }
       } else if (enemy.type === 'goliath') {
         // Goliath: Stays at mid range (12-16 units), winds up dual mortar artillery
-        enemy.rotation = Math.atan2(dx, dz);
+        enemy.rotation = Math.atan2(-dx, -dz);
         if (enemy.state === 'chase') {
           if (dist > 15) {
             enemy.vx = (dx / dist) * enemy.speed;
@@ -1517,7 +1871,7 @@ export class GameEngine {
 
         enemy.vx = dtx * 2.0;
         enemy.vz = dtz * 2.0;
-        enemy.rotation = Math.atan2(dx, dz);
+        enemy.rotation = Math.atan2(-dx, -dz);
 
         // Spin charge ring
         if (enemy.subParts?.chargeRing) {
@@ -1534,7 +1888,7 @@ export class GameEngine {
       } else if (enemy.type === 'colossus') {
         // Boss: Colossus
         this.bossHpRatio = Math.max(0, enemy.hp / enemy.maxHp);
-        enemy.rotation = Math.atan2(dx, dz);
+        enemy.rotation = Math.atan2(-dx, -dz);
 
         // Advance towards center
         if (dist > 10) {
@@ -1560,10 +1914,10 @@ export class GameEngine {
           const baseAng = enemy.rotation;
           [-0.3, -0.1, 0.1, 0.3].forEach((angOffset) => {
             const shotAng = baseAng + angOffset;
-            const sx = enemy.x + Math.sin(shotAng) * 2.5;
-            const sz = enemy.z + Math.cos(shotAng) * 2.5;
-            const targetX = sx + Math.sin(shotAng) * 20;
-            const targetZ = sz + Math.cos(shotAng) * 20;
+            const sx = enemy.x - Math.sin(shotAng) * 2.5;
+            const sz = enemy.z - Math.cos(shotAng) * 2.5;
+            const targetX = sx - Math.sin(shotAng) * 20;
+            const targetZ = sz - Math.cos(shotAng) * 20;
             this.fireEnemyShot(sx, sz, targetX, targetZ, 20, 20);
           });
           enemy.timer = 0;
@@ -1764,8 +2118,8 @@ export class GameEngine {
     const shakeZ = (Math.random() * 2 - 1) * shake * 1.4;
 
     // Smoothly track player position with lookahead
-    const targetCamX = this.playerX + (this.aimTargetX - this.playerX) * 0.25 + shakeX;
-    const targetCamZ = this.playerZ + this.cameraBaseZ + (this.aimTargetZ - this.playerZ) * 0.2 + shakeZ;
+    const targetCamX = this.playerX + (this.aimTargetX - this.playerX) * 0.15 + shakeX;
+    const targetCamZ = this.playerZ + this.cameraBaseZ + (this.aimTargetZ - this.playerZ) * 0.12 + shakeZ;
     const targetCamY = this.cameraBaseY + shakeY;
 
     this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, targetCamX, 6, dt);
@@ -1781,9 +2135,9 @@ export class GameEngine {
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);
     window.removeEventListener('blur', this.handleBlur);
-    this.container.removeEventListener('pointermove', this.handlePointerMove);
-    this.container.removeEventListener('pointerdown', this.handlePointerDown);
-    this.container.removeEventListener('pointerup', this.handlePointerUp);
+    window.removeEventListener('pointermove', this.handlePointerMove);
+    window.removeEventListener('pointerdown', this.handlePointerDown);
+    window.removeEventListener('pointerup', this.handlePointerUp);
     window.removeEventListener('resize', this.handleResize);
 
     sound.stopMusic();

@@ -199,20 +199,57 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
         </div>
 
-        {/* Top-Center: Wave Info & Boss Bar */}
-        <div className="flex flex-col items-center">
-          <div className="px-3 sm:px-5 py-1 rounded-b-md border-x border-b border-cyan-500/30 bg-neutral-950/90 text-center">
-            <div className="text-[8px] sm:text-[10px] tracking-[0.2em] text-cyan-400 uppercase font-mono-numbers font-bold">
-              WAVE
+        {/* Top-Center: Sector Level, Wave Info & Quantum Portal Waypoint */}
+        <div className="flex flex-col items-center gap-1.5">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Sector Level Badge */}
+            <div className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1 rounded-b-md border border-cyan-500/30 bg-neutral-950/90 shadow-[0_0_15px_rgba(0,240,255,0.15)] text-center">
+              <span className="text-[8px] sm:text-[10px] font-mono-numbers tracking-wider font-bold text-cyan-400 uppercase">
+                LEVEL {stats.sectorLevel || 1}
+              </span>
+              <span className="text-neutral-500 text-xs">/</span>
+              <span className="text-[9px] sm:text-xs font-mono-numbers font-bold text-white tracking-wide uppercase truncate max-w-[110px] sm:max-w-[200px]">
+                {stats.sectorName || 'Neon Core'}
+              </span>
             </div>
-            <div className="text-base sm:text-xl font-black text-white font-mono-numbers tracking-wider tabular-nums">
-              {stats.wave.toString().padStart(2, '0')}
+
+            {/* Wave Counter */}
+            <div className="px-2.5 sm:px-3.5 py-1 rounded-b-md border border-cyan-500/30 bg-neutral-950/90 text-center">
+              <span className="text-[8px] sm:text-[10px] tracking-wider text-cyan-400 font-mono-numbers font-bold uppercase mr-1">
+                WAVE
+              </span>
+              <span className="text-xs sm:text-base font-black text-white font-mono-numbers tabular-nums">
+                {stats.wave.toString().padStart(2, '0')}
+              </span>
             </div>
           </div>
 
+          {/* Quantum Warp Portal Waypoint / Objective Alert */}
+          {stats.portalActive && (
+            <div className="animate-bounce flex items-center gap-2 px-3 sm:px-4 py-1 rounded-full border border-cyan-400 bg-cyan-950/90 text-cyan-300 shadow-[0_0_20px_rgba(0,240,255,0.4)]">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+              <span className="text-[9px] sm:text-xs font-mono-numbers font-bold tracking-wider uppercase">
+                PORTAL ACTIVE: WARP TO LEVEL {(stats.sectorLevel || 1) + 1}
+              </span>
+              {stats.portalDistance !== null && (
+                <span className="text-[9px] sm:text-xs font-mono-numbers font-bold text-amber-300 bg-black/50 px-2 py-0.5 rounded-full border border-amber-400/40">
+                  {stats.portalDistance}M
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Tactical Arena Hazard Warning */}
+          {stats.hazardTelegraphing && (
+            <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border border-amber-500/70 bg-amber-950/85 text-amber-300 text-[8px] sm:text-[10px] font-mono-numbers font-bold tracking-wider animate-pulse shadow-[0_0_12px_rgba(245,158,11,0.45)]">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+              <span>TACTICAL HAZARD TELEGRAPHING // EVADE</span>
+            </div>
+          )}
+
           {/* Boss Bar if Boss is Active */}
           {bossHpRatio !== null && bossHpRatio !== undefined && (
-            <div className="mt-2 w-48 sm:w-64 md:w-80 flex flex-col gap-0.5 items-center">
+            <div className="mt-1 w-48 sm:w-64 md:w-80 flex flex-col gap-0.5 items-center">
               <div className="flex justify-between w-full text-[9px] sm:text-[10px] font-mono-numbers tracking-wider text-red-400 font-bold uppercase">
                 <span>TITAN APEX BOSS</span>
                 <span className="tabular-nums">{Math.round(bossHpRatio * 100)}%</span>
