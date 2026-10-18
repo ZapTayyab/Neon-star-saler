@@ -225,9 +225,9 @@ attribute float aSize;`
   }
 
   /**
-   * Spawns high-contrast, neon-blue particle trails behind the mech whenever a kinetic dash is performed.
-   * Emits luminous blue/cyan plasma ribbons with white-hot core sparks, backward exhaust velocity,
-   * lateral turbulence, and rapid fade to accentuate the extreme sensation of speed.
+   * Spawns high-contrast, glowing neon particle trails behind the mech whenever a kinetic dash is performed.
+   * Emits luminous plasma ribbons with white-hot core sparks, backward exhaust velocity,
+   * lateral ionization turbulence, and rapid aerodynamic drag to accentuate kinetic speed.
    */
   public spawnDashTrail(
     leftX: number,
@@ -240,13 +240,22 @@ attribute float aSize;`
     dashVz: number,
     customColor?: number
   ) {
+    const midX = (leftX + rightX) / 2;
+    const midY = (leftY + rightY) / 2;
+    const midZ = (leftZ + rightZ) / 2;
+
     const sources = [
-      { x: leftX, y: leftY, z: leftZ },
-      { x: rightX, y: rightY, z: rightZ },
-      { x: (leftX + rightX) / 2, y: (leftY + rightY) / 2, z: (leftZ + rightZ) / 2 },
+      { x: leftX, y: leftY, z: leftZ, isWing: false },
+      { x: rightX, y: rightY, z: rightZ, isWing: false },
+      { x: midX, y: midY, z: midZ, isWing: false },
+      // Left and right wingtips for aerodynamic condensation streamers
+      { x: leftX - 0.45, y: leftY - 0.05, z: leftZ - 0.2, isWing: true },
+      { x: rightX + 0.45, y: rightY - 0.05, z: rightZ - 0.2, isWing: true },
     ];
 
+    const trailHex = customColor || 0x00f0ff;
     const countPerSource = 3;
+
     sources.forEach((source, sIdx) => {
       for (let k = 0; k < countPerSource; k++) {
         const idx = (this.poolCursor + k + sIdx * countPerSource) % MAX_PARTICLES;
@@ -254,30 +263,29 @@ attribute float aSize;`
         if (!p.active) {
           p.active = true;
           // Jitter slightly for volumetric wake breadth
-          p.x = source.x + (Math.random() - 0.5) * 0.16;
-          p.y = source.y + (Math.random() - 0.5) * 0.14;
-          p.z = source.z + (Math.random() - 0.5) * 0.16;
+          p.x = source.x + (Math.random() - 0.5) * 0.18;
+          p.y = source.y + (Math.random() - 0.5) * 0.15;
+          p.z = source.z + (Math.random() - 0.5) * 0.18;
 
-          // Eject backward opposite to dash direction with slight exhaust flare
-          const revX = -dashVx * 0.22;
-          const revZ = -dashVz * 0.22;
+          // Eject backward opposite to dash direction with supersonic exhaust flare
+          const revX = -dashVx * 0.28;
+          const revZ = -dashVz * 0.28;
           const flareAngle = Math.random() * Math.PI * 2;
-          const flareSpeed = 1.0 + Math.random() * 2.8;
+          const flareSpeed = 1.2 + Math.random() * 3.5;
 
           p.vx = revX + Math.cos(flareAngle) * flareSpeed;
-          p.vy = (Math.random() - 0.3) * 1.5;
+          p.vy = (Math.random() - 0.3) * 1.8;
           p.vz = revZ + Math.sin(flareAngle) * flareSpeed;
 
-          // High-contrast neon-blue palette with white-hot core sparks
+          // Palette: 35% pure white-hot core spark, 50% saturated neon trail hue, 15% electric cyan/azure
+          const roll = Math.random();
           let colHex: number;
-          if (customColor && Math.random() < 0.6) {
-            colHex = customColor;
+          if (roll < 0.35) {
+            colHex = 0xffffff; // Ultra-bright white-hot core
+          } else if (roll < 0.85) {
+            colHex = trailHex; // Active mech skin neon trail color
           } else {
-            const roll = Math.random();
-            if (roll < 0.3) colHex = 0xffffff; // White-hot core spark
-            else if (roll < 0.65) colHex = 0x00f0ff; // Neon Cyan
-            else if (roll < 0.85) colHex = 0x0066ff; // High-contrast Electric Blue
-            else colHex = 0x00d4ff; // Vibrant Azure
+            colHex = 0x00f0ff; // High-contrast electric cyan
           }
 
           _tempColor.setHex(colHex);
@@ -285,16 +293,63 @@ attribute float aSize;`
           p.g = _tempColor.g;
           p.b = _tempColor.b;
 
-          // Bold initial size for high visibility streak
-          p.size = (colHex === 0xffffff ? 0.95 : 0.7) + Math.random() * 0.45;
-          p.life = 0.2 + Math.random() * 0.18; // 0.2s - 0.38s
+          // High-visibility luminous size
+          p.size = (colHex === 0xffffff ? 1.05 : 0.75) + Math.random() * 0.45;
+          p.life = 0.22 + Math.random() * 0.18;
           p.maxLife = p.life;
-          p.drag = 4.0; // snappy pop & fade
+          p.drag = 4.2; // Aerodynamic drag pop and smooth fade
 
           this.poolCursor = (idx + 1) % MAX_PARTICLES;
         }
       }
     });
+  }
+
+  /**
+   * Spawns an explosive 360-degree radial kinetic burst at the dash ignition point
+   */
+  public spawnDashBurst(
+    x: number,
+    y: number,
+    z: number,
+    vx: number,
+    vz: number,
+    customColor?: number
+  ) {
+    const burstCount = 28;
+    const trailHex = customColor || 0x00f0ff;
+    const dashAngle = Math.atan2(vx, vz);
+
+    for (let i = 0; i < burstCount; i++) {
+      const idx = (this.poolCursor + i) % MAX_PARTICLES;
+      const p = this.pool[idx];
+      if (!p.active) {
+        p.active = true;
+        p.x = x + (Math.random() - 0.5) * 0.3;
+        p.y = y + Math.random() * 0.2;
+        p.z = z + (Math.random() - 0.5) * 0.3;
+
+        // Fan backward and sideways from dash origin
+        const spreadAng = dashAngle + Math.PI + (Math.random() - 0.5) * Math.PI * 1.4;
+        const spd = 6.0 + Math.random() * 12.0;
+        p.vx = Math.sin(spreadAng) * spd;
+        p.vy = 1.0 + Math.random() * 4.0;
+        p.vz = Math.cos(spreadAng) * spd;
+
+        const isWhite = Math.random() < 0.4;
+        _tempColor.setHex(isWhite ? 0xffffff : trailHex);
+        p.r = _tempColor.r;
+        p.g = _tempColor.g;
+        p.b = _tempColor.b;
+
+        p.size = (isWhite ? 1.2 : 0.8) + Math.random() * 0.4;
+        p.life = 0.25 + Math.random() * 0.2;
+        p.maxLife = p.life;
+        p.drag = 5.0;
+
+        this.poolCursor = (idx + 1) % MAX_PARTICLES;
+      }
+    }
   }
 
   public spawnPortalSwirl(

@@ -248,20 +248,30 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           )}
 
           {/* Boss Bar if Boss is Active */}
-          {bossHpRatio !== null && bossHpRatio !== undefined && (
-            <div className="mt-1 w-48 sm:w-64 md:w-80 flex flex-col gap-0.5 items-center">
-              <div className="flex justify-between w-full text-[9px] sm:text-[10px] font-mono-numbers tracking-wider text-red-400 font-bold uppercase">
-                <span>TITAN APEX BOSS</span>
-                <span className="tabular-nums">{Math.round(bossHpRatio * 100)}%</span>
+          {(bossHpRatio !== null && bossHpRatio !== undefined) || stats.bossActive ? (
+            <div className="mt-1.5 w-60 sm:w-80 md:w-96 flex flex-col gap-1 items-center bg-neutral-950/90 border border-red-500/40 p-2 rounded-xs shadow-[0_0_25px_rgba(239,68,68,0.25)]">
+              <div className="flex justify-between items-center w-full text-[9px] sm:text-[10px] font-mono-numbers tracking-wider font-bold uppercase">
+                <span className="flex items-center gap-1.5 text-red-400">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                  <span className="text-white font-black">{stats.bossName || 'TITAN APEX BOSS'}</span>
+                </span>
+                <span className="text-amber-400 text-[8px] sm:text-[9px] px-1.5 py-0.2 bg-red-950/80 border border-red-500/40 rounded-xs">
+                  {stats.bossPhase || 'PHASE 1: ASSAULT'}
+                </span>
+                <span className="text-red-400 font-mono-numbers font-bold tabular-nums">
+                  {Math.round((bossHpRatio ?? stats.bossHpRatio ?? 1) * 100)}%
+                </span>
               </div>
-              <div className="w-full h-2 bg-neutral-950 border border-red-500/50 rounded-xs overflow-hidden">
+              <div className="w-full h-2.5 bg-neutral-900 border border-red-500/60 rounded-xs overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-red-600 via-rose-500 to-amber-500 transition-all duration-100"
-                  style={{ width: `${Math.max(0, bossHpRatio * 100)}%` }}
-                />
+                  className="h-full bg-gradient-to-r from-red-600 via-rose-500 to-amber-500 transition-all duration-150 relative"
+                  style={{ width: `${Math.max(0, (bossHpRatio ?? stats.bossHpRatio ?? 1) * 100)}%` }}
+                >
+                  <div className="absolute inset-0 bg-white/20 animate-pulse" />
+                </div>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Top-Right: Controls, Score & XP Progression */}

@@ -126,7 +126,23 @@ class SoundEngine {
     if (!this.ctx || !this.sfxGain) return;
 
     const t = this.ctx.currentTime;
-    const bufferSize = this.ctx.sampleRate * 0.22;
+    const duration = 0.24;
+
+    // 1. Resonant Sub-Bass Kinetic Thump (punchy physical acceleration)
+    const subOsc = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    subOsc.type = 'sine';
+    subOsc.frequency.setValueAtTime(160, t);
+    subOsc.frequency.exponentialRampToValueAtTime(38, t + duration);
+    subGain.gain.setValueAtTime(0.55, t);
+    subGain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    subOsc.connect(subGain);
+    subGain.connect(this.sfxGain);
+    subOsc.start(t);
+    subOsc.stop(t + duration);
+
+    // 2. High-Pressure Aerodynamic Whoosh (noise through resonant bandpass)
+    const bufferSize = Math.floor(this.ctx.sampleRate * duration);
     const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) {
@@ -138,21 +154,36 @@ class SoundEngine {
 
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(400, t);
-    filter.frequency.exponentialRampToValueAtTime(2800, t + 0.08);
-    filter.frequency.exponentialRampToValueAtTime(300, t + 0.22);
-    filter.Q.setValueAtTime(3.5, t);
+    filter.frequency.setValueAtTime(350, t);
+    filter.frequency.exponentialRampToValueAtTime(3200, t + 0.07);
+    filter.frequency.exponentialRampToValueAtTime(240, t + duration);
+    filter.Q.setValueAtTime(4.0, t);
 
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.5, t);
-    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.22);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.65, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, t + duration);
 
     noise.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.sfxGain);
+    filter.connect(noiseGain);
+    noiseGain.connect(this.sfxGain);
 
     noise.start(t);
-    noise.stop(t + 0.22);
+    noise.stop(t + duration);
+
+    // 3. High-Frequency Kinetic Ionization Whine
+    const whineOsc = this.ctx.createOscillator();
+    const whineGain = this.ctx.createGain();
+    whineOsc.type = 'sawtooth';
+    whineOsc.frequency.setValueAtTime(880, t);
+    whineOsc.frequency.exponentialRampToValueAtTime(1760, t + 0.06);
+    whineOsc.frequency.exponentialRampToValueAtTime(300, t + duration);
+
+    whineGain.gain.setValueAtTime(0.2, t);
+    whineGain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    whineOsc.connect(whineGain);
+    whineGain.connect(this.sfxGain);
+    whineOsc.start(t);
+    whineOsc.stop(t + duration);
   }
 
   public playHit() {
@@ -520,6 +551,118 @@ class SoundEngine {
 
     osc.start(t);
     osc.stop(t + 0.14);
+  }
+
+  // --- Boss Battle Sound Effects ---
+
+  public playBossIntroSiren() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const t = this.ctx.currentTime;
+    // Ominous sub-bass drop and battle horn siren
+    const osc = this.ctx.createOscillator();
+    const sub = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(110, t);
+    osc.frequency.exponentialRampToValueAtTime(73.4, t + 0.8);
+
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(55, t);
+    sub.frequency.exponentialRampToValueAtTime(36.7, t + 0.9);
+
+    gain.gain.setValueAtTime(0.35, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
+
+    osc.connect(gain);
+    sub.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(t);
+    sub.start(t);
+    osc.stop(t + 0.9);
+    sub.stop(t + 0.9);
+  }
+
+  public playBossLaserCharge() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const t = this.ctx.currentTime;
+    // Rising high-pitch capacitor whine
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(280, t);
+    osc.frequency.exponentialRampToValueAtTime(1400, t + 0.7);
+
+    gain.gain.setValueAtTime(0.01, t);
+    gain.gain.linearRampToValueAtTime(0.2, t + 0.65);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.75);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(t);
+    osc.stop(t + 0.75);
+  }
+
+  public playBossLaserFire() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const t = this.ctx.currentTime;
+    // Massive roaring energy beam
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(160, t);
+    osc.frequency.linearRampToValueAtTime(120, t + 0.8);
+
+    gain.gain.setValueAtTime(0.3, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.85);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(t);
+    osc.stop(t + 0.85);
+  }
+
+  public playBossShockwave() {
+    if (this.isMuted) return;
+    this.initCtx();
+    if (!this.ctx || !this.sfxGain) return;
+
+    const t = this.ctx.currentTime;
+    // Deep ground slam impact with resonant bass
+    const osc = this.ctx.createOscillator();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(180, t);
+    osc.frequency.exponentialRampToValueAtTime(32, t + 0.6);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(350, t);
+
+    gain.gain.setValueAtTime(0.45, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+
+    osc.start(t);
+    osc.stop(t + 0.65);
   }
 
   public playLaserGridActive() {

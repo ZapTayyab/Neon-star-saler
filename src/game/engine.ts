@@ -3,8 +3,11 @@ import { ARENA_RADIUS, buildArena, getSectorTheme } from './arena';
 import { sound } from './audio';
 import {
   createColossusBoss,
+  createGoliathPrimeBoss,
+  createHyperionArchonBoss,
   createPickupMesh,
   createPlayerMech,
+  createShieldDrone,
   createSiegeGoliath,
   createStalkerDrone,
   createVectorDrone,
@@ -15,6 +18,8 @@ import { ParticleManager } from './particles';
 import { QuantumPortal } from './portal';
 import { applySkinToMech, getSavedSkinId, getSkinById, MechSkin, saveSkinId } from './skins';
 import { EnemyType, GameState, PlayerStats, UpgradeOption } from './types';
+import { createFreshUpgradePool, selectUpgradeChoices } from './upgrades';
+import { DashTrailManager } from './dashTrail';
 
 // Pre-allocated math objects to avoid garbage collection
 const _v1 = new THREE.Vector3();
@@ -74,7 +79,7 @@ export interface EnemyEntity {
   telegraphProgress: number; // 0 to 1
   hitFlashTimer: number;
   telegraphMesh?: THREE.Line | THREE.Mesh;
-  subParts?: Record<string, THREE.Object3D>;
+  subParts?: Record<string, any>;
 }
 
 export interface PickupEntity {
@@ -87,72 +92,6 @@ export interface PickupEntity {
   life: number;
 }
 
-export const ALL_UPGRADES: UpgradeOption[] = [
-  {
-    id: 'plasma_split',
-    title: 'Twin Multi-Cannon',
-    description: 'Adds an extra parallel plasma bolt to each salvo.',
-    icon: 'target',
-    rarity: 'rare',
-    level: 0,
-    maxLevel: 3,
-  },
-  {
-    id: 'overclock_thruster',
-    title: 'Kinetic Overclock',
-    description: '+22% Hover speed & reduces Dash cooldown by 20%.',
-    icon: 'zap',
-    rarity: 'common',
-    level: 0,
-    maxLevel: 4,
-  },
-  {
-    id: 'plasma_pierce',
-    title: 'High-Density Cores',
-    description: 'Plasma shots pierce through +1 additional enemy.',
-    icon: 'shield',
-    rarity: 'rare',
-    level: 0,
-    maxLevel: 3,
-  },
-  {
-    id: 'chain_lightning',
-    title: 'Arc Overload',
-    description: 'Critical hits arc lightning bolts to 2 nearby enemies.',
-    icon: 'sparkles',
-    rarity: 'epic',
-    level: 0,
-    maxLevel: 2,
-  },
-  {
-    id: 'siphon_nanite',
-    title: 'Siphon Nanites',
-    description: '15% chance to instantly repair 10 HP on enemy takedown.',
-    icon: 'heart',
-    rarity: 'rare',
-    level: 0,
-    maxLevel: 3,
-  },
-  {
-    id: 'orbital_drone',
-    title: 'Vanguard Aegis Drone',
-    description: 'Deploy an automated escort drone that fires at targets.',
-    icon: 'cpu',
-    rarity: 'epic',
-    level: 0,
-    maxLevel: 2,
-  },
-  {
-    id: 'emp_supercharge',
-    title: 'EMP Resonator',
-    description: '+35% EMP Shockwave damage radius and clears all bullets.',
-    icon: 'radio',
-    rarity: 'rare',
-    level: 0,
-    maxLevel: 3,
-  },
-];
-
 export class GameEngine {
   private container: HTMLElement;
   private scene: THREE.Scene;
@@ -161,6 +100,9 @@ export class GameEngine {
   private clock: THREE.Clock;
   private particleManager: ParticleManager;
   private arena: ReturnType<typeof buildArena>;
+
+  // Upgrades Catalog
+  public activeUpgradePool: UpgradeOption[] = createFreshUpgradePool();
 
   // Player Model & State
   private playerModel: ReturnType<typeof createPlayerMech>;
@@ -183,6 +125,7 @@ export class GameEngine {
   private hitstopTimer: number = 0;
   private cameraBaseY: number = 22;
   private cameraBaseZ: number = 18;
+  private cameraBaseFov: number = 50;
 
   // Input states (Desktop & Mobile)
   private keysHeld: Record<string, boolean> = {};
@@ -218,6 +161,9 @@ export class GameEngine {
   // Localized Arena Hazards (Electrified Floor Tiles & Laser Grids)
   public hazardManager: HazardManager;
 
+  // Kinetic Glowing Neon Dash Trail & Holographic Afterimage System
+  public dashTrailManager: DashTrailManager;
+
   // Kinetic Dash High-Contrast Trail Tracking
   private prevThrusterLX: number = 0;
   private prevThrusterLY: number = 0;
@@ -234,12 +180,17 @@ export class GameEngine {
   private nextEnemyId: number = 1;
   private nextPickupId: number = 1;
 
-  // Wave Director
+  // Wave Director & Boss Battle Engine
   public gameState: GameState = 'title';
   private waveTimer: number = 0;
   private waveEnemiesToSpawn: { type: EnemyType; delay: number }[] = [];
-  private bossEntity: EnemyEntity | null = null;
+  public bossEntity: EnemyEntity | null = null;
   public bossHpRatio: number = 1;
+  public activeBossType: EnemyType | null = null;
+  private bossAttackTimer: number = 0;
+  private bossSpiralAngle: number = 0;
+  private bossShieldDrones: EnemyEntity[] = [];
+  private bossLaserChargeMesh: THREE.Mesh | null = null;
 
   // Callbacks to React
   private onStatsUpdate: (stats: PlayerStats) => void;
@@ -302,6 +253,10 @@ export class GameEngine {
     // Initialize Localized Arena Hazards
     this.hazardManager = new HazardManager(this.scene, this.particleManager);
 
+    // Initialize Glowing Neon Dash Trail & Afterimage System
+    this.dashTrailManager = new DashTrailManager(this.scene);
+    this.dashTrailManager.setTrailColor(this.currentSkin?.colors?.trail || 0x00f0ff);
+
     // Initial stats
     this.playerStats = {
       maxHp: 100,
@@ -334,6 +289,7 @@ export class GameEngine {
       chainLightning: false,
       orbitalDrones: 0,
       siphonChance: 0,
+      magnetRange: 4.5,
       // Sector Level, Quantum Portal & Mech Skin
       sectorLevel: 1,
       sectorName: 'Neon Core',
@@ -343,6 +299,10 @@ export class GameEngine {
       equippedSkinId: this.currentSkin.id,
       hazardCount: 0,
       hazardTelegraphing: false,
+      bossActive: false,
+      bossName: '',
+      bossPhase: '',
+      bossHpRatio: null,
     };
 
     // Holographic target reticle and laser sight guide on ground
@@ -557,18 +517,19 @@ export class GameEngine {
       // Tall portrait phone (e.g. 9:16 or 9:19.5)
       this.cameraBaseY = 32;
       this.cameraBaseZ = 24;
-      this.camera.fov = 64;
+      this.cameraBaseFov = 64;
     } else if (aspect < 1.2) {
       // Compact square / foldable / tablet
       this.cameraBaseY = 26;
       this.cameraBaseZ = 20;
-      this.camera.fov = 56;
+      this.cameraBaseFov = 56;
     } else {
       // Standard landscape / desktop
       this.cameraBaseY = 22;
       this.cameraBaseZ = 18;
-      this.camera.fov = 50;
+      this.cameraBaseFov = 50;
     }
+    this.camera.fov = this.cameraBaseFov;
 
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
@@ -595,17 +556,33 @@ export class GameEngine {
     saveSkinId(skinId);
     applySkinToMech(this.playerModel, this.currentSkin);
     this.playerStats.equippedSkinId = skinId;
+    this.dashTrailManager.setTrailColor(this.currentSkin?.colors?.trail || 0x00f0ff);
     this.onStatsUpdate({ ...this.playerStats });
   }
 
   public resetStats() {
-    this.playerStats.hp = this.playerStats.maxHp;
-    this.playerStats.shield = this.playerStats.maxShield;
-    this.playerStats.dashCharges = this.playerStats.maxDashCharges;
+    this.activeUpgradePool = createFreshUpgradePool();
+    this.dashTrailManager.clear();
+    this.dashTrailManager.setTrailColor(this.currentSkin?.colors?.trail || 0x00f0ff);
+
+    this.playerStats.maxHp = 100;
+    this.playerStats.hp = 100;
+    this.playerStats.maxShield = 60;
+    this.playerStats.shield = 60;
+    this.playerStats.shieldRegenRate = 15;
+    this.playerStats.shieldDelayTimer = 0;
+    this.playerStats.moveSpeed = 14;
+    this.playerStats.dashCharges = 2;
+    this.playerStats.maxDashCharges = 2;
+    this.playerStats.dashCooldown = 2.8;
+    this.playerStats.dashTimer = 0;
+    this.playerStats.isDashing = false;
+    this.playerStats.dashTimeRemaining = 0;
     this.playerStats.empCharge = 100;
     this.playerStats.score = 0;
     this.playerStats.combo = 0;
     this.playerStats.comboTimer = 0;
+    this.playerStats.comboMultiplier = 1.0;
     this.playerStats.wave = 1;
     this.playerStats.sectorLevel = 1;
     this.playerStats.sectorName = 'Neon Core';
@@ -618,6 +595,25 @@ export class GameEngine {
     this.playerStats.xpToNextLevel = 100;
     this.playerStats.level = 1;
     this.playerStats.kills = 0;
+
+    // Upgrades
+    this.playerStats.bulletSpread = 1;
+    this.playerStats.fireRate = 6.5;
+    this.playerStats.bulletDamage = 32;
+    this.playerStats.pierceCount = 1;
+    this.playerStats.chainLightning = false;
+    this.playerStats.orbitalDrones = 0;
+    this.playerStats.siphonChance = 0;
+    this.playerStats.magnetRange = 4.5;
+
+    // Boss state
+    this.playerStats.bossActive = false;
+    this.playerStats.bossName = '';
+    this.playerStats.bossPhase = '';
+    this.playerStats.bossHpRatio = null;
+    this.bossEntity = null;
+    this.activeBossType = null;
+    this.bossShieldDrones = [];
 
     this.playerX = 0;
     this.playerZ = 0;
@@ -654,6 +650,7 @@ export class GameEngine {
 
     this.hazardManager.clear();
     this.bossEntity = null;
+    this.bossShieldDrones = [];
   }
 
   // --- Wave Director ---
@@ -661,18 +658,63 @@ export class GameEngine {
     this.playerStats.wave = waveNumber;
     this.waveTimer = 0;
     this.waveEnemiesToSpawn = [];
+    this.bossShieldDrones = [];
 
-    const isBossWave = waveNumber % 5 === 0;
+    // Boss waves spawn after every 6 levels (Wave 6, 12, 18, 24...)
+    const isBossWave = waveNumber % 6 === 0;
 
     if (isBossWave) {
-      sound.playTelegraphAlert();
-      // Boss wave: Titan Colossus + supporting escorts
-      this.waveEnemiesToSpawn.push({ type: 'colossus', delay: 1.0 });
-      for (let i = 0; i < 4; i++) {
-        this.waveEnemiesToSpawn.push({ type: 'stalker', delay: 3.0 + i * 2.0 });
+      sound.playBossIntroSiren();
+      this.addTrauma(0.65);
+      triggerHaptic(90);
+
+      // Rotate through distinct apex boss classes
+      const bossCycle = Math.floor(waveNumber / 6) % 3;
+      let bossType: EnemyType = 'boss_goliath_prime';
+      let bName = 'GOLIATH PRIME';
+      let bPhase = 'PHASE 1: SIEGE ARTILLERY';
+
+      if (bossCycle === 1) {
+        bossType = 'boss_goliath_prime';
+        bName = 'GOLIATH PRIME // SIEGE DREADNOUGHT';
+        bPhase = 'PHASE 1: MORTAR BARRAGE';
+      } else if (bossCycle === 2) {
+        bossType = 'boss_nexus_colossus';
+        bName = 'NEXUS OMNI-COLOSSUS // VECTOR DESTROYER';
+        bPhase = 'PHASE 1: HELIX BULLET HELL';
+      } else {
+        bossType = 'boss_hyperion_archon';
+        bName = 'HYPERION ARCHON // VOID OVERLORD';
+        bPhase = 'PHASE 1: ORBITAL SWEEP';
+      }
+
+      this.activeBossType = bossType;
+      this.playerStats.bossActive = true;
+      this.playerStats.bossName = bName;
+      this.playerStats.bossPhase = bPhase;
+      this.playerStats.bossHpRatio = 1.0;
+      this.onStatsUpdate({ ...this.playerStats });
+
+      // Spawn boss as main encounter
+      this.waveEnemiesToSpawn.push({ type: bossType, delay: 0.8 });
+
+      // Escort support
+      const escortCount = Math.min(2 + Math.floor(waveNumber / 6), 5);
+      for (let i = 0; i < escortCount; i++) {
+        this.waveEnemiesToSpawn.push({
+          type: i % 2 === 0 ? 'stalker' : 'sniper',
+          delay: 3.5 + i * 2.5,
+        });
       }
     } else {
-      // Procedural wave compositions
+      this.playerStats.bossActive = false;
+      this.playerStats.bossName = '';
+      this.playerStats.bossPhase = '';
+      this.playerStats.bossHpRatio = null;
+      this.activeBossType = null;
+      this.onStatsUpdate({ ...this.playerStats });
+
+      // Procedural regular wave compositions
       const stalkerCount = 6 + waveNumber * 3;
       const goliathCount = waveNumber >= 2 ? Math.floor(waveNumber * 1.2) : 0;
       const sniperCount = waveNumber >= 3 ? Math.floor(waveNumber * 0.9) : 0;
@@ -831,11 +873,12 @@ export class GameEngine {
         hitFlashTimer: 0,
         subParts: { chargeRing },
       };
-    } else {
-      // Titan Colossus Boss
-      const { group, meshes, core, shieldMesh } = createColossusBoss();
+    } else if (type === 'boss_goliath_prime') {
+      // Wave 6 Boss: Goliath Prime - Heavy Siege Dreadnought
+      const { group, meshes, core, mortarL, mortarR } = createGoliathPrimeBoss();
       group.position.set(0, 0, -ARENA_RADIUS + 6);
       this.scene.add(group);
+      const bossHp = 2600 + this.playerStats.wave * 420;
       entity = {
         id,
         type,
@@ -848,10 +891,40 @@ export class GameEngine {
         vz: 0,
         rotation: 0,
         targetRotation: 0,
-        maxHp: 1600 + this.playerStats.wave * 300,
-        hp: 1600 + this.playerStats.wave * 300,
-        speed: 3.2,
+        maxHp: bossHp,
+        hp: bossHp,
+        speed: 3.4,
         radius: 3.2,
+        state: 'chase',
+        timer: 0,
+        windupDuration: 1.5,
+        telegraphProgress: 0,
+        hitFlashTimer: 0,
+        subParts: { core, mortarL, mortarR },
+      };
+      this.bossEntity = entity;
+    } else if (type === 'boss_nexus_colossus' || type === 'colossus') {
+      // Wave 12 Boss: Nexus Omni-Colossus
+      const { group, meshes, core, shieldMesh } = createColossusBoss();
+      group.position.set(0, 0, -ARENA_RADIUS + 6);
+      this.scene.add(group);
+      const bossHp = 4200 + this.playerStats.wave * 520;
+      entity = {
+        id,
+        type: 'boss_nexus_colossus',
+        group,
+        meshes,
+        x: 0,
+        y: 0,
+        z: -ARENA_RADIUS + 6,
+        vx: 0,
+        vz: 0,
+        rotation: 0,
+        targetRotation: 0,
+        maxHp: bossHp,
+        hp: bossHp,
+        speed: 3.0,
+        radius: 3.6,
         state: 'chase',
         timer: 0,
         windupDuration: 1.5,
@@ -860,6 +933,93 @@ export class GameEngine {
         subParts: { core, shieldMesh },
       };
       this.bossEntity = entity;
+    } else if (type === 'boss_hyperion_archon') {
+      // Wave 18+ Boss: Hyperion Archon - Void Overlord
+      const { group, meshes, core, haloRing } = createHyperionArchonBoss();
+      group.position.set(0, 0, -ARENA_RADIUS + 6);
+      this.scene.add(group);
+      const bossHp = 6000 + this.playerStats.wave * 650;
+      entity = {
+        id,
+        type,
+        group,
+        meshes,
+        x: 0,
+        y: 0,
+        z: -ARENA_RADIUS + 6,
+        vx: 0,
+        vz: 0,
+        rotation: 0,
+        targetRotation: 0,
+        maxHp: bossHp,
+        hp: bossHp,
+        speed: 3.8,
+        radius: 3.8,
+        state: 'chase',
+        timer: 0,
+        windupDuration: 1.5,
+        telegraphProgress: 0,
+        hitFlashTimer: 0,
+        subParts: { core, haloRing },
+      };
+      this.bossEntity = entity;
+    } else if (type === 'boss_shield_drone') {
+      // Shield Escort Drone deployed by bosses
+      const { group, meshes, dome } = createShieldDrone();
+      group.position.set(x, 0, z);
+      this.scene.add(group);
+      entity = {
+        id,
+        type,
+        group,
+        meshes,
+        x,
+        y: 0,
+        z,
+        vx: 0,
+        vz: 0,
+        rotation: 0,
+        targetRotation: 0,
+        maxHp: 220 + this.playerStats.wave * 25,
+        hp: 220 + this.playerStats.wave * 25,
+        speed: 7.0,
+        radius: 0.9,
+        state: 'chase',
+        timer: 0,
+        windupDuration: 1.0,
+        telegraphProgress: 0,
+        hitFlashTimer: 0,
+        subParts: { dome },
+      };
+      this.bossShieldDrones.push(entity);
+    } else {
+      // General Fallback Drone
+      const { group, meshes, eye } = createStalkerDrone();
+      group.position.set(x, 0, z);
+      this.scene.add(group);
+      entity = {
+        id,
+        type: 'stalker',
+        group,
+        meshes,
+        x,
+        y: 0,
+        z,
+        vx: 0,
+        vz: 0,
+        rotation: 0,
+        targetRotation: 0,
+        maxHp: 60,
+        hp: 60,
+        speed: 9.0,
+        radius: 0.8,
+        state: 'chase',
+        timer: 0,
+        windupDuration: 0.7,
+        telegraphProgress: 0,
+        hitFlashTimer: 0,
+        subParts: { eye },
+      };
     }
 
     this.enemies.push(entity);
@@ -998,8 +1158,32 @@ export class GameEngine {
     this.prevThrusterRY = _v2.y;
     this.prevThrusterRZ = _v2.z;
 
-    // High-contrast neon-blue trail burst on dash initiation
     const trailColor = this.currentSkin?.colors?.trail || 0x00f0ff;
+    const hoverY = this.playerModel.group.position.y || 0.6;
+
+    // Instant supersonic mach ring, chrono-ghost afterimage, and thruster neon light flare
+    this.dashTrailManager.triggerBurst(
+      this.playerX,
+      hoverY,
+      this.playerZ,
+      this.playerRot,
+      this.playerModel.group.rotation.x,
+      this.playerModel.group.rotation.z,
+      this.playerVx,
+      this.playerVz
+    );
+
+    // Radial 360-degree kinetic particle burst
+    this.particleManager.spawnDashBurst(
+      this.playerX,
+      hoverY,
+      this.playerZ,
+      this.playerVx,
+      this.playerVz,
+      trailColor
+    );
+
+    // High-contrast glowing neon trail ejecta
     this.particleManager.spawnDashTrail(
       _v1.x,
       _v1.y,
@@ -1011,7 +1195,7 @@ export class GameEngine {
       this.playerVz,
       trailColor
     );
-    this.addTrauma(0.2);
+    this.addTrauma(0.24);
   }
 
   public triggerEMP() {
@@ -1068,7 +1252,21 @@ export class GameEngine {
     hitY?: number,
     hitZ?: number
   ) {
-    enemy.hp -= damage;
+    let finalDamage = damage;
+    if (enemy === this.bossEntity && this.bossShieldDrones.length > 0) {
+      finalDamage *= 0.25; // 75% damage reduction from shield drone escort
+      this.particleManager.spawn(
+        hitX ?? enemy.x,
+        hitY ?? 1.5,
+        hitZ ?? enemy.z,
+        6,
+        0x00f0ff,
+        8,
+        0.3,
+        0.2
+      );
+    }
+    enemy.hp -= finalDamage;
     enemy.hitFlashTimer = 0.08;
     sound.playHit();
 
@@ -1102,48 +1300,95 @@ export class GameEngine {
   }
 
   private killEnemy(enemy: EnemyEntity) {
-    sound.playExplosion(enemy.type === 'colossus');
-    this.addTrauma(enemy.type === 'colossus' ? 0.7 : 0.25);
-    this.triggerHitstop(enemy.type === 'colossus' ? 0.08 : 0.035);
+    const isBoss =
+      enemy === this.bossEntity ||
+      (enemy.type.startsWith('boss_') && enemy.type !== 'boss_shield_drone');
 
-    const isLarge = enemy.type === 'colossus' || enemy.type === 'goliath';
-    this.particleManager.spawn(
-      enemy.x,
-      1.0,
-      enemy.z,
-      isLarge ? 70 : 25,
-      enemy.type === 'colossus' ? 0xf43f5e : 0xff9900,
-      isLarge ? 16 : 9,
-      0.65,
-      0.5
-    );
+    sound.playExplosion(isBoss || enemy.type === 'colossus');
+    this.addTrauma(isBoss ? 0.85 : enemy.type === 'goliath' ? 0.4 : 0.25);
+    this.triggerHitstop(isBoss ? 0.12 : 0.035);
 
-    // Score & Combo
-    this.playerStats.kills++;
-    this.playerStats.combo++;
-    this.playerStats.comboTimer = 3.5;
-    const multiplier = 1 + Math.min(this.playerStats.combo * 0.1, 4.0);
-    this.playerStats.comboMultiplier = Number(multiplier.toFixed(1));
-    const basePoints = enemy.type === 'colossus' ? 3000 : enemy.type === 'goliath' ? 400 : 150;
-    this.playerStats.score += Math.round(basePoints * multiplier);
-    this.playerStats.empCharge = Math.min(100, this.playerStats.empCharge + (isLarge ? 35 : 12));
+    if (isBoss) {
+      // Massive multi-stage chain explosions for Apex Boss
+      this.particleManager.spawn(enemy.x, 1.2, enemy.z, 120, 0xf43f5e, 24, 0.9, 0.6);
+      this.particleManager.spawn(enemy.x + 1.2, 1.6, enemy.z - 1.0, 80, 0xff9900, 20, 0.8, 0.5);
+      this.particleManager.spawn(enemy.x - 1.2, 1.2, enemy.z + 1.0, 80, 0x00f0ff, 20, 0.8, 0.5);
 
-    // Visceral audio feedback for streaks
-    if (this.playerStats.combo >= 2) {
-      sound.playComboStreak(this.playerStats.combo);
+      // Score & Combo
+      this.playerStats.kills++;
+      this.playerStats.combo += 5;
+      this.playerStats.comboTimer = 5.0;
+      this.playerStats.score += 15000 * Math.floor(this.playerStats.wave / 6);
+      this.playerStats.empCharge = 100;
+
+      // Drop massive XP hoard
+      for (let k = 0; k < 6; k++) {
+        const offX = (Math.random() - 0.5) * 3.5;
+        const offZ = (Math.random() - 0.5) * 3.5;
+        this.spawnPickup('xp', enemy.x + offX, enemy.z + offZ);
+      }
+      this.spawnPickup('heal', enemy.x + 1.5, enemy.z);
+      this.spawnPickup('emp', enemy.x - 1.5, enemy.z);
+
+      // Defeating boss unlocks the Quantum Warp Portal immediately!
+      this.spawnQuantumPortal();
+
+      this.bossEntity = null;
+      this.playerStats.bossActive = false;
+      this.playerStats.bossHpRatio = null;
+      this.playerStats.bossName = '';
+      this.playerStats.bossPhase = '';
+      this.onStatsUpdate({ ...this.playerStats });
+    } else {
+      const isLarge = enemy.type === 'goliath' || enemy.type === 'colossus';
+      this.particleManager.spawn(
+        enemy.x,
+        1.0,
+        enemy.z,
+        isLarge ? 70 : 25,
+        enemy.type === 'colossus' ? 0xf43f5e : 0xff9900,
+        isLarge ? 16 : 9,
+        0.65,
+        0.5
+      );
+
+      // Score & Combo
+      this.playerStats.kills++;
+      this.playerStats.combo++;
+      this.playerStats.comboTimer = 3.5;
+      const multiplier = 1 + Math.min(this.playerStats.combo * 0.1, 4.0);
+      this.playerStats.comboMultiplier = Number(multiplier.toFixed(1));
+      const basePoints = enemy.type === 'goliath' ? 400 : 150;
+      this.playerStats.score += Math.round(basePoints * multiplier);
+      this.playerStats.empCharge = Math.min(100, this.playerStats.empCharge + (isLarge ? 35 : 12));
+
+      // Visceral audio feedback for streaks
+      if (this.playerStats.combo >= 2) {
+        sound.playComboStreak(this.playerStats.combo);
+      }
+
+      // Siphon Nanite upgrade
+      if (this.playerStats.siphonChance > 0 && Math.random() < this.playerStats.siphonChance) {
+        this.playerStats.hp = Math.min(this.playerStats.maxHp, this.playerStats.hp + 12);
+        sound.playPickup();
+        this.particleManager.spawn(this.playerX, 0.5, this.playerZ, 12, 0x10b981, 6, 0.4, 0.3);
+      }
+
+      // Spawn Pickups (XP and chance for heal/emp)
+      this.spawnPickup('xp', enemy.x, enemy.z);
+      if (Math.random() < 0.18) {
+        this.spawnPickup(Math.random() < 0.5 ? 'heal' : 'emp', enemy.x + 0.5, enemy.z);
+      }
     }
 
-    // Siphon Nanite upgrade
-    if (this.playerStats.siphonChance > 0 && Math.random() < this.playerStats.siphonChance) {
-      this.playerStats.hp = Math.min(this.playerStats.maxHp, this.playerStats.hp + 12);
-      sound.playPickup();
-      this.particleManager.spawn(this.playerX, 0.5, this.playerZ, 12, 0x10b981, 6, 0.4, 0.3);
-    }
-
-    // Spawn Pickups (XP and chance for heal/emp)
-    this.spawnPickup('xp', enemy.x, enemy.z);
-    if (Math.random() < 0.18 || enemy.type === 'colossus') {
-      this.spawnPickup(Math.random() < 0.5 ? 'heal' : 'emp', enemy.x + 0.5, enemy.z);
+    // Shield drone handling
+    if (enemy.type === 'boss_shield_drone') {
+      const dIdx = this.bossShieldDrones.indexOf(enemy);
+      if (dIdx !== -1) this.bossShieldDrones.splice(dIdx, 1);
+      // Feedback damage on boss
+      if (this.bossEntity) {
+        this.damageEnemy(this.bossEntity, 300);
+      }
     }
 
     // Cleanup enemy
@@ -1151,10 +1396,6 @@ export class GameEngine {
     if (enemy.telegraphMesh) this.scene.remove(enemy.telegraphMesh);
     const idx = this.enemies.indexOf(enemy);
     if (idx !== -1) this.enemies.splice(idx, 1);
-
-    if (enemy === this.bossEntity) {
-      this.bossEntity = null;
-    }
   }
 
   private spawnPickup(type: 'xp' | 'heal' | 'emp', x: number, z: number) {
@@ -1205,36 +1446,65 @@ export class GameEngine {
 
   private triggerUpgradeSelection() {
     this.setGameState('upgrade');
-    // Pick 3 random eligible upgrades
-    const available = ALL_UPGRADES.filter((u) => u.level < u.maxLevel);
-    const shuffled = [...available].sort(() => 0.5 - Math.random());
-    const choices = shuffled.slice(0, 3);
+    // Guaranteed 3 distinct upgrades, never empty
+    const choices = selectUpgradeChoices(this.activeUpgradePool, 3);
     this.onUpgradePrompt(choices);
   }
 
   public applyUpgrade(upgradeId: string) {
-    const upgrade = ALL_UPGRADES.find((u) => u.id === upgradeId);
-    if (!upgrade) return;
-
-    upgrade.level++;
-    if (upgrade.id === 'plasma_split') {
-      this.playerStats.bulletSpread = Math.min(4, this.playerStats.bulletSpread + 1);
-    } else if (upgrade.id === 'overclock_thruster') {
-      this.playerStats.moveSpeed *= 1.2;
-      this.playerStats.dashCooldown *= 0.8;
-    } else if (upgrade.id === 'plasma_pierce') {
-      this.playerStats.pierceCount++;
-    } else if (upgrade.id === 'chain_lightning') {
-      this.playerStats.chainLightning = true;
-    } else if (upgrade.id === 'siphon_nanite') {
-      this.playerStats.siphonChance += 0.15;
-    } else if (upgrade.id === 'orbital_drone') {
-      this.playerStats.orbitalDrones++;
-      this.updateEscortDrones();
-    } else if (upgrade.id === 'emp_supercharge') {
-      this.playerStats.bulletDamage += 12;
+    const upgrade = this.activeUpgradePool.find((u) => u.id === upgradeId);
+    if (upgrade) {
+      upgrade.level++;
     }
 
+    if (upgradeId === 'plasma_split') {
+      this.playerStats.bulletSpread = Math.min(4, this.playerStats.bulletSpread + 1);
+    } else if (upgradeId === 'rapid_accelerator') {
+      this.playerStats.fireRate *= 1.25;
+    } else if (upgradeId === 'overclock_thruster') {
+      this.playerStats.moveSpeed *= 1.20;
+      this.playerStats.dashCooldown *= 0.8;
+    } else if (upgradeId === 'plasma_pierce') {
+      this.playerStats.pierceCount++;
+    } else if (upgradeId === 'chain_lightning') {
+      this.playerStats.chainLightning = true;
+    } else if (upgradeId === 'siphon_nanite') {
+      this.playerStats.siphonChance += 0.18;
+    } else if (upgradeId === 'orbital_drone') {
+      this.playerStats.orbitalDrones++;
+      this.updateEscortDrones();
+    } else if (upgradeId === 'emp_supercharge') {
+      this.playerStats.bulletDamage += 14;
+    } else if (upgradeId === 'shield_capacitor') {
+      this.playerStats.maxShield += 25;
+      this.playerStats.shield = this.playerStats.maxShield;
+      this.playerStats.shieldRegenRate += 8;
+    } else if (upgradeId === 'hull_reinforce') {
+      this.playerStats.maxHp += 35;
+      this.playerStats.hp = Math.min(this.playerStats.maxHp, this.playerStats.hp + 40);
+    } else if (upgradeId === 'dash_overdrive') {
+      this.playerStats.maxDashCharges++;
+      this.playerStats.dashCharges++;
+    } else if (upgradeId === 'magnet_nanites') {
+      this.playerStats.magnetRange += 5.0;
+    } else if (upgradeId.startsWith('overclock_damage')) {
+      this.playerStats.bulletDamage = Math.round(this.playerStats.bulletDamage * 1.15);
+      this.playerStats.score += 5000;
+    } else if (upgradeId.startsWith('overclock_hull')) {
+      this.playerStats.maxHp += 25;
+      this.playerStats.hp = this.playerStats.maxHp;
+      this.playerStats.shield = this.playerStats.maxShield;
+    } else if (upgradeId.startsWith('overclock_shield')) {
+      this.playerStats.maxShield += 20;
+      this.playerStats.shield = this.playerStats.maxShield;
+    } else if (upgradeId.startsWith('overclock_speed')) {
+      this.playerStats.moveSpeed *= 1.10;
+    } else if (upgradeId.startsWith('overclock_emp')) {
+      this.playerStats.score += 6000;
+      this.playerStats.empCharge = 100;
+    }
+
+    this.onStatsUpdate({ ...this.playerStats });
     this.setGameState('playing');
   }
 
@@ -1389,11 +1659,17 @@ export class GameEngine {
         this.playerStats.isDashing = false;
       }
     } else {
-      // Smooth exponential acceleration / damping
+      // Responsive dynamic acceleration / braking
       const targetVx = moveInputX * this.playerStats.moveSpeed;
       const targetVz = moveInputZ * this.playerStats.moveSpeed;
-      this.playerVx = THREE.MathUtils.damp(this.playerVx, targetVx, 12, dt);
-      this.playerVz = THREE.MathUtils.damp(this.playerVz, targetVz, 12, dt);
+
+      // Snappy direction changes: higher acceleration rate when turning or reversing to eliminate sluggish feel
+      const isReversingX = moveInputX !== 0 && Math.sign(moveInputX) !== Math.sign(this.playerVx);
+      const isReversingZ = moveInputZ !== 0 && Math.sign(moveInputZ) !== Math.sign(this.playerVz);
+      const accelRate = isReversingX || isReversingZ ? 26 : inputLen > 0.05 ? 18 : 15;
+
+      this.playerVx = THREE.MathUtils.damp(this.playerVx, targetVx, accelRate, dt);
+      this.playerVz = THREE.MathUtils.damp(this.playerVz, targetVz, accelRate, dt);
     }
 
     this.playerX += this.playerVx * dt;
@@ -1520,29 +1796,70 @@ export class GameEngine {
       this.aimLaserLine.visible = false;
     }
 
-    // Apply model transforms with hover bobbing & bank roll
-    const hoverY = 0.55 + Math.sin(time * 6) * 0.05;
+    // Transform world velocity into local mech frame for realistic physical banking and pitch
+    const sinR = Math.sin(this.playerRot);
+    const cosR = Math.cos(this.playerRot);
+    // Relative strafe velocity (local X: positive = strafing right, negative = strafing left)
+    const localStrafeV = this.playerVx * cosR - this.playerVz * sinR;
+    // Relative forward velocity (local -Z is forward: positive = moving forward, negative = reversing)
+    const localForwardV = -(this.playerVx * sinR + this.playerVz * cosR);
+
+    // Dynamic hover elevation with speed suspension
+    const speedRatio = Math.min(
+      1.0,
+      Math.hypot(this.playerVx, this.playerVz) / (this.playerStats.moveSpeed || 14)
+    );
+    const hoverY = 0.55 + Math.sin(time * 7) * 0.05 + speedRatio * 0.06;
     this.playerModel.group.position.set(this.playerX, hoverY, this.playerZ);
     this.playerModel.group.rotation.y = this.playerRot;
 
-    // Bank roll on lateral turn
-    const bankTarget = -this.playerVx * 0.035;
+    // Roll banking: lean into lateral strafes
+    const bankTarget = -localStrafeV * 0.046;
     this.playerModel.group.rotation.z = THREE.MathUtils.damp(
       this.playerModel.group.rotation.z,
       bankTarget,
-      8,
+      12,
+      dt
+    );
+
+    // Combat pitch: aggressive forward hover stance on acceleration, lean back on brake
+    const pitchTarget = localForwardV * 0.038;
+    this.playerModel.group.rotation.x = THREE.MathUtils.damp(
+      this.playerModel.group.rotation.x,
+      pitchTarget,
+      12,
       dt
     );
 
     // Thruster flame dynamics
     const thrustScale =
-      this.playerStats.isDashing ? 3.0 : inputLen > 0.1 ? 1.3 + Math.sin(time * 25) * 0.2 : 0.8;
+      this.playerStats.isDashing ? 3.2 : inputLen > 0.1 ? 1.4 + Math.sin(time * 25) * 0.2 : 0.8;
     this.playerModel.thrusterL.scale.set(1, thrustScale, 1);
     this.playerModel.thrusterR.scale.set(1, thrustScale, 1);
 
-    // Continuous High-Contrast Neon-Blue Particle Trail on Kinetic Dash
+    // Continuous High-Contrast Neon-Blue Particle Trail & Volumetric Dash Streamers
     this.playerModel.thrusterL.getWorldPosition(_v1);
     this.playerModel.thrusterR.getWorldPosition(_v2);
+
+    // Update Glowing Neon Dash Trail & Holographic Afterimage System
+    this.dashTrailManager.update(
+      dt,
+      this.playerStats.isDashing,
+      this.playerX,
+      hoverY,
+      this.playerZ,
+      this.playerRot,
+      this.playerModel.group.rotation.x,
+      this.playerModel.group.rotation.z,
+      _v1.x,
+      _v1.y,
+      _v1.z,
+      _v2.x,
+      _v2.y,
+      _v2.z,
+      this.playerVx,
+      this.playerVz
+    );
 
     if (this.playerStats.isDashing) {
       const trailColor = this.currentSkin?.colors?.trail || 0x00f0ff;
@@ -1885,13 +2202,116 @@ export class GameEngine {
           this.particleManager.spawn(enemy.x, 0.8, enemy.z, 15, 0xd946ef, 12, 0.4, 0.25);
           enemy.timer = 0;
         }
-      } else if (enemy.type === 'colossus') {
-        // Boss: Colossus
+      } else if (enemy.type === 'boss_goliath_prime') {
+        // --- WAVE 6 APEX BOSS: GOLIATH PRIME ---
         this.bossHpRatio = Math.max(0, enemy.hp / enemy.maxHp);
+        this.playerStats.bossHpRatio = this.bossHpRatio;
         enemy.rotation = Math.atan2(-dx, -dz);
 
-        // Advance towards center
-        if (dist > 10) {
+        const isOverdrive = this.bossHpRatio <= 0.5;
+        this.playerStats.bossPhase = isOverdrive
+          ? 'PHASE 2: BERSERK OVERDRIVE'
+          : 'PHASE 1: SIEGE ARTILLERY';
+
+        // Approach to artillery engagement range
+        if (dist > 12) {
+          enemy.vx = (dx / dist) * (isOverdrive ? 4.6 : 3.4);
+          enemy.vz = (dz / dist) * (isOverdrive ? 4.6 : 3.4);
+        } else {
+          enemy.vx *= 0.88;
+          enemy.vz *= 0.88;
+        }
+
+        // Molten core flare
+        if (enemy.subParts?.core) {
+          const coreMesh = enemy.subParts.core as THREE.Mesh;
+          coreMesh.rotation.y = time * (isOverdrive ? 5.0 : 2.5);
+          (coreMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = isOverdrive ? 4.5 : 2.5;
+        }
+
+        // Heavy Direct Dual Cannon Burst (Every 1.8s)
+        enemy.timer += dt;
+        if (enemy.timer >= (isOverdrive ? 1.5 : 2.0)) {
+          enemy.timer = 0;
+          const baseAng = enemy.rotation;
+          [-0.12, 0.12].forEach((offset) => {
+            const shotAng = baseAng + offset;
+            const sx = enemy.x - Math.sin(shotAng) * 2.8;
+            const sz = enemy.z - Math.cos(shotAng) * 2.8;
+            const tx = sx - Math.sin(shotAng) * 25;
+            const tz = sz - Math.cos(shotAng) * 25;
+            this.fireEnemyShot(sx, sz, tx, tz, 24, 28);
+          });
+          this.particleManager.spawn(enemy.x, 1.4, enemy.z, 20, 0xff5500, 10, 0.5, 0.3);
+        }
+
+        // Signature Attack: Siege Mortar Artillery & Shockwave
+        this.bossAttackTimer += dt;
+        if (this.bossAttackTimer >= (isOverdrive ? 3.5 : 4.8)) {
+          this.bossAttackTimer = 0;
+
+          if (isOverdrive) {
+            // Ground Slam Shockwave!
+            sound.playBossShockwave();
+            this.addTrauma(0.5);
+            this.particleManager.triggerEMPRing(enemy.x, enemy.z, 0xff3b00);
+            this.particleManager.spawn(enemy.x, 0.2, enemy.z, 50, 0xff3b00, 18, 0.7, 0.5);
+
+            // Expanding shockwave damage check (jump/dash through it!)
+            if (dist < 12.0 && !this.playerStats.isDashing) {
+              this.damagePlayer(30);
+              // Knockback player away from boss
+              const kx = (this.playerX - enemy.x) / (dist || 1);
+              const kz = (this.playerZ - enemy.z) / (dist || 1);
+              this.playerVx += kx * 22;
+              this.playerVz += kz * 22;
+            }
+
+            // Also fire 8-way shrapnel ring
+            for (let a = 0; a < 8; a++) {
+              const ang = (a * Math.PI * 2) / 8 + enemy.rotation;
+              const sx = enemy.x - Math.sin(ang) * 2.5;
+              const sz = enemy.z - Math.cos(ang) * 2.5;
+              const tx = sx - Math.sin(ang) * 20;
+              const tz = sz - Math.cos(ang) * 20;
+              this.fireEnemyShot(sx, sz, tx, tz, 18, 18);
+            }
+          } else {
+            // Mortar barrage targeting player's predicted coordinates
+            sound.playHazardWarning();
+            const impactX = this.playerX + (Math.random() - 0.5) * 4;
+            const impactZ = this.playerZ + (Math.random() - 0.5) * 4;
+
+            // Spawn warning telegraph on ground
+            this.particleManager.spawn(impactX, 0.1, impactZ, 25, 0xff3b00, 6, 0.6, 0.4);
+
+            // Schedule delayed mortar detonation
+            window.setTimeout(() => {
+              if (this.gameState === 'playing') {
+                sound.playExplosion(true);
+                this.addTrauma(0.4);
+                this.particleManager.spawn(impactX, 0.8, impactZ, 60, 0xff5500, 16, 0.8, 0.5);
+                const dPlayer = Math.hypot(this.playerX - impactX, this.playerZ - impactZ);
+                if (dPlayer < 3.8 && !this.playerStats.isDashing) {
+                  this.damagePlayer(32);
+                }
+              }
+            }, 900);
+          }
+        }
+      } else if (enemy.type === 'boss_nexus_colossus' || enemy.type === 'colossus') {
+        // --- WAVE 12 APEX BOSS: NEXUS OMNI-COLOSSUS ---
+        this.bossHpRatio = Math.max(0, enemy.hp / enemy.maxHp);
+        this.playerStats.bossHpRatio = this.bossHpRatio;
+        enemy.rotation = Math.atan2(-dx, -dz);
+
+        const isPhase2 = this.bossHpRatio <= 0.5;
+        this.playerStats.bossPhase = isPhase2
+          ? 'PHASE 2: SHIELD OVERDRIVE'
+          : 'PHASE 1: HELIX BULLET HELL';
+
+        // Approach cautiously
+        if (dist > 13) {
           enemy.vx = (dx / dist) * enemy.speed;
           enemy.vz = (dz / dist) * enemy.speed;
         } else {
@@ -1899,28 +2319,135 @@ export class GameEngine {
           enemy.vz *= 0.9;
         }
 
-        // Pulse core & rotate shield
+        // Pulse core & rotate shield mesh
         if (enemy.subParts?.core) {
-          (enemy.subParts.core as THREE.Mesh).rotation.y = time * 3.0;
+          (enemy.subParts.core as THREE.Mesh).rotation.y = time * 3.5;
         }
         if (enemy.subParts?.shieldMesh) {
-          (enemy.subParts.shieldMesh as THREE.Mesh).rotation.y = -time * 0.5;
+          const sMesh = enemy.subParts.shieldMesh as THREE.Mesh;
+          sMesh.rotation.y = -time * 0.8;
+          // While shield drones live, shield is ultra bright and opaque
+          const hasDrones = this.bossShieldDrones.length > 0;
+          (sMesh.material as THREE.MeshStandardMaterial).opacity = hasDrones ? 0.75 : 0.25;
+          (sMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = hasDrones ? 1.8 : 0.6;
         }
 
-        // Multi-phase attack cycle
+        // Spawn shield drones once entering Phase 2
+        if (isPhase2 && !enemy.subParts?.dronesDeployed) {
+          if (!enemy.subParts) enemy.subParts = {};
+          enemy.subParts.dronesDeployed = true;
+          sound.playBossIntroSiren();
+          // Spawn 4 orbiting shield drones
+          for (let i = 0; i < 4; i++) {
+            this.spawnEnemy('boss_shield_drone');
+          }
+        }
+
+        // Continuous Double-Helix Spiral Bullet Storm (Bullet Hell)
+        this.bossSpiralAngle += dt * 3.5;
         enemy.timer += dt;
-        if (enemy.timer >= 2.2) {
-          // Quad spread volley
+        if (enemy.timer >= 0.22) {
+          enemy.timer = 0;
+          [-0.15, 0.15].forEach((offset) => {
+            const shotAng = this.bossSpiralAngle + offset;
+            const sx = enemy.x - Math.sin(shotAng) * 2.2;
+            const sz = enemy.z - Math.cos(shotAng) * 2.2;
+            const tx = sx - Math.sin(shotAng) * 22;
+            const tz = sz - Math.cos(shotAng) * 22;
+            this.fireEnemyShot(sx, sz, tx, tz, 16, 18);
+          });
+        }
+
+        // Sweeping Searing Death Laser (Every 6.0s)
+        this.bossAttackTimer += dt;
+        if (this.bossAttackTimer >= 6.0) {
+          this.bossAttackTimer = 0;
+          sound.playBossLaserFire();
+          this.addTrauma(0.4);
+
+          // Sweeping 7-bolt arc fan
           const baseAng = enemy.rotation;
-          [-0.3, -0.1, 0.1, 0.3].forEach((angOffset) => {
+          [-0.45, -0.3, -0.15, 0, 0.15, 0.3, 0.45].forEach((angOffset) => {
             const shotAng = baseAng + angOffset;
+            const sx = enemy.x - Math.sin(shotAng) * 2.8;
+            const sz = enemy.z - Math.cos(shotAng) * 2.8;
+            const tx = sx - Math.sin(shotAng) * 26;
+            const tz = sz - Math.cos(shotAng) * 26;
+            this.fireEnemyShot(sx, sz, tx, tz, 24, 25);
+          });
+        }
+      } else if (enemy.type === 'boss_hyperion_archon') {
+        // --- WAVE 18+ APEX BOSS: HYPERION ARCHON ---
+        this.bossHpRatio = Math.max(0, enemy.hp / enemy.maxHp);
+        this.playerStats.bossHpRatio = this.bossHpRatio;
+        enemy.rotation = Math.atan2(-dx, -dz);
+
+        const isPhase2 = this.bossHpRatio <= 0.5;
+        this.playerStats.bossPhase = isPhase2
+          ? 'PHASE 2: APEX EXTINCTION'
+          : 'PHASE 1: VOID MATRIX';
+
+        // Hover & glide around arena center
+        const glideAngle = time * 0.5;
+        const targetX = Math.cos(glideAngle) * 8;
+        const targetZ = Math.sin(glideAngle) * 8;
+        enemy.vx = (targetX - enemy.x) * 1.5;
+        enemy.vz = (targetZ - enemy.z) * 1.5;
+
+        // Spin halo ring & core
+        if (enemy.subParts?.haloRing) {
+          (enemy.subParts.haloRing as THREE.Mesh).rotation.z = time * 2.5;
+        }
+        if (enemy.subParts?.core) {
+          (enemy.subParts.core as THREE.Mesh).rotation.y = time * 4.0;
+        }
+
+        // Teleport Phase Shift if player gets too close
+        if (dist < 6.5) {
+          sound.playPortalWarp();
+          this.particleManager.spawn(enemy.x, 2.0, enemy.z, 40, 0xa855f7, 14, 0.5, 0.3);
+          const warpAngle = Math.random() * Math.PI * 2;
+          enemy.x = Math.cos(warpAngle) * 15;
+          enemy.z = Math.sin(warpAngle) * 15;
+          this.particleManager.spawn(enemy.x, 2.0, enemy.z, 40, 0xa855f7, 14, 0.5, 0.3);
+        }
+
+        // Rapid 12-way starburst pulse (Every 2.4s)
+        enemy.timer += dt;
+        if (enemy.timer >= (isPhase2 ? 1.6 : 2.4)) {
+          enemy.timer = 0;
+          sound.playLaser(600);
+          const count = isPhase2 ? 16 : 12;
+          for (let k = 0; k < count; k++) {
+            const shotAng = (k * Math.PI * 2) / count + time;
             const sx = enemy.x - Math.sin(shotAng) * 2.5;
             const sz = enemy.z - Math.cos(shotAng) * 2.5;
-            const targetX = sx - Math.sin(shotAng) * 20;
-            const targetZ = sz - Math.cos(shotAng) * 20;
-            this.fireEnemyShot(sx, sz, targetX, targetZ, 20, 20);
-          });
-          enemy.timer = 0;
+            const tx = sx - Math.sin(shotAng) * 25;
+            const tz = sz - Math.cos(shotAng) * 25;
+            this.fireEnemyShot(sx, sz, tx, tz, 20, 22);
+          }
+        }
+      } else if (enemy.type === 'boss_shield_drone') {
+        // Escort Shield Drone: Circles the active boss
+        if (this.bossEntity) {
+          const orbitAngle = time * 2.0 + (enemy.id % 4) * (Math.PI / 2);
+          const orbitRadius = 5.5;
+          const targetX = this.bossEntity.x + Math.cos(orbitAngle) * orbitRadius;
+          const targetZ = this.bossEntity.z + Math.sin(orbitAngle) * orbitRadius;
+          enemy.vx = (targetX - enemy.x) * 4.0;
+          enemy.vz = (targetZ - enemy.z) * 4.0;
+          enemy.rotation = Math.atan2(-(this.playerX - enemy.x), -(this.playerZ - enemy.z));
+
+          // Occasional support shot at player
+          enemy.timer += dt;
+          if (enemy.timer >= 2.2) {
+            enemy.timer = 0;
+            this.fireEnemyShot(enemy.x, enemy.z, this.playerX, this.playerZ, 14, 18);
+          }
+        } else {
+          // If boss died, fly toward player
+          enemy.vx = (dx / (dist || 1)) * enemy.speed;
+          enemy.vz = (dz / (dist || 1)) * enemy.speed;
         }
       }
 
@@ -2073,8 +2600,9 @@ export class GameEngine {
       const dz = this.playerZ - p.z;
       const dist = Math.hypot(dx, dz);
 
-      if (dist < 6.0) {
-        const pull = (1 - dist / 6.0) * 16 * dt;
+      const magnetDist = this.playerStats.magnetRange || 5.0;
+      if (dist < magnetDist) {
+        const pull = (1 - dist / magnetDist) * 20 * dt;
         p.x += (dx / (dist || 1)) * pull;
         p.z += (dz / (dist || 1)) * pull;
         p.group.position.set(p.x, 0, p.z);
@@ -2125,6 +2653,11 @@ export class GameEngine {
     this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, targetCamX, 6, dt);
     this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, targetCamY, 6, dt);
     this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, targetCamZ, 6, dt);
+
+    // Dynamic kinetic FOV expansion on dash (visceral warp acceleration effect)
+    const targetFov = this.playerStats.isDashing ? this.cameraBaseFov + 3.2 : this.cameraBaseFov;
+    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 12, dt);
+    this.camera.updateProjectionMatrix();
 
     this.camera.lookAt(this.playerX + shakeX * 0.5, 0.5, this.playerZ + shakeZ * 0.5);
   }

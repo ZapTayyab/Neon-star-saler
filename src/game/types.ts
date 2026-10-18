@@ -1,6 +1,14 @@
 export type GameState = 'title' | 'playing' | 'upgrade' | 'paused' | 'gameover' | 'victory';
 
-export type EnemyType = 'stalker' | 'goliath' | 'sniper' | 'colossus';
+export type EnemyType =
+  | 'stalker'
+  | 'goliath'
+  | 'sniper'
+  | 'colossus'
+  | 'boss_goliath_prime'
+  | 'boss_nexus_colossus'
+  | 'boss_hyperion_archon'
+  | 'boss_shield_drone';
 
 export interface UpgradeOption {
   id: string;
@@ -44,6 +52,7 @@ export interface PlayerStats {
   chainLightning: boolean;
   orbitalDrones: number;
   siphonChance: number;
+  magnetRange: number;
   // Sector Progression, Quantum Portal & Customization
   sectorLevel: number;
   sectorName: string;
@@ -54,6 +63,11 @@ export interface PlayerStats {
   // Arena Tactical Hazards
   hazardCount: number;
   hazardTelegraphing: boolean;
+  // Boss Battle Telemetry
+  bossActive: boolean;
+  bossName: string;
+  bossPhase: string;
+  bossHpRatio: number | null;
 }
 
 export interface TelegraphIndicator {

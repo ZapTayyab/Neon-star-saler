@@ -56,6 +56,7 @@ export default function App() {
     chainLightning: false,
     orbitalDrones: 0,
     siphonChance: 0,
+    magnetRange: 4.5,
     sectorLevel: 1,
     sectorName: 'Neon Core',
     portalActive: false,
@@ -64,6 +65,10 @@ export default function App() {
     equippedSkinId: getSavedSkinId(),
     hazardCount: 0,
     hazardTelegraphing: false,
+    bossActive: false,
+    bossName: '',
+    bossPhase: '',
+    bossHpRatio: null,
   });
 
   const [bossHpRatio, setBossHpRatio] = useState<number | null>(null);
@@ -85,12 +90,10 @@ export default function App() {
       }
 
       setStats(newStats);
-      if (engineRef.current && engineRef.current.bossHpRatio !== undefined) {
-        setBossHpRatio(
-          engineRef.current.playerStats.wave % 5 === 0 && engineRef.current.bossHpRatio > 0
-            ? engineRef.current.bossHpRatio
-            : null
-        );
+      if (newStats.bossActive && newStats.bossHpRatio !== null && newStats.bossHpRatio > 0) {
+        setBossHpRatio(newStats.bossHpRatio);
+      } else {
+        setBossHpRatio(null);
       }
     },
     onStateChange: (newState: GameState) => {
@@ -98,7 +101,7 @@ export default function App() {
       if (
         newState === 'playing' &&
         engineRef.current?.playerStats.wave &&
-        engineRef.current.playerStats.wave % 5 === 1 &&
+        engineRef.current.playerStats.wave % 6 === 1 &&
         engineRef.current.playerStats.wave > 1
       ) {
         // Celebrate boss clear with confetti

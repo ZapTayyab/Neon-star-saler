@@ -616,3 +616,206 @@ export function createPickupMesh(type: 'xp' | 'heal' | 'emp'): { group: THREE.Gr
 
   return { group, mesh };
 }
+
+/**
+ * Wave 6 Boss: Goliath Prime - Heavy Siege Dreadnought
+ */
+export function createGoliathPrimeBoss(): {
+  group: THREE.Group;
+  meshes: THREE.Mesh[];
+  core: THREE.Mesh;
+  mortarL: THREE.Group;
+  mortarR: THREE.Group;
+} {
+  const group = new THREE.Group();
+  const meshes: THREE.Mesh[] = [];
+
+  // 1. Reinforced Dreadnought Chassis
+  const chassisGeo = new THREE.BoxGeometry(3.2, 1.6, 3.4);
+  const chassis = new THREE.Mesh(chassisGeo, materials.bossArmor);
+  chassis.position.set(0, 1.8, 0);
+  chassis.castShadow = true;
+  group.add(chassis);
+  meshes.push(chassis);
+
+  // 2. Heavy Angled Front Prow
+  const prowGeo = new THREE.ConeGeometry(1.8, 2.0, 4);
+  prowGeo.rotateX(-Math.PI / 2);
+  const prow = new THREE.Mesh(prowGeo, materials.goliathPlates);
+  prow.position.set(0, 1.8, -2.4);
+  prow.castShadow = true;
+  group.add(prow);
+  meshes.push(prow);
+
+  // 3. Central Molten Reactor Core
+  const coreGeo = new THREE.SphereGeometry(1.0, 16, 16);
+  const coreMat = new THREE.MeshStandardMaterial({
+    color: 0xff3b00,
+    emissive: 0xff4500,
+    emissiveIntensity: 3.0,
+    metalness: 0.9,
+    roughness: 0.1,
+  });
+  const core = new THREE.Mesh(coreGeo, coreMat);
+  core.position.set(0, 2.0, 0);
+  group.add(core);
+
+  // 4. Dual Heavy Siege Mortar Batteries (Left & Right)
+  const mortarL = new THREE.Group();
+  mortarL.position.set(-1.9, 2.5, 0.4);
+  const mBaseL = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 0.6, 8), materials.goliathPlates);
+  const mTubeL = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 1.8, 8), materials.playerGuns);
+  mTubeL.position.set(0, 0.8, -0.4);
+  mTubeL.rotation.x = -Math.PI / 4;
+  mortarL.add(mBaseL);
+  mortarL.add(mTubeL);
+  group.add(mortarL);
+  meshes.push(mBaseL, mTubeL);
+
+  const mortarR = new THREE.Group();
+  mortarR.position.set(1.9, 2.5, 0.4);
+  const mBaseR = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 0.6, 8), materials.goliathPlates);
+  const mTubeR = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 1.8, 8), materials.playerGuns);
+  mTubeR.position.set(0, 0.8, -0.4);
+  mTubeR.rotation.x = -Math.PI / 4;
+  mortarR.add(mBaseR);
+  mortarR.add(mTubeR);
+  group.add(mortarR);
+  meshes.push(mBaseR, mTubeR);
+
+  // 5. Heavy Front Dual Cannons
+  for (let s of [-0.9, 0.9]) {
+    const cannonGeo = new THREE.CylinderGeometry(0.18, 0.22, 2.4, 8);
+    cannonGeo.rotateX(Math.PI / 2);
+    const cannon = new THREE.Mesh(cannonGeo, materials.playerGuns);
+    cannon.position.set(s, 1.4, -2.6);
+    group.add(cannon);
+    meshes.push(cannon);
+  }
+
+  // 6. Ground Shadow
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(7.0, 7.0), softShadowMaterial);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.02;
+  group.add(shadow);
+
+  return { group, meshes, core, mortarL, mortarR };
+}
+
+/**
+ * Wave 18+ Boss: Hyperion Archon - The Void Overlord
+ */
+export function createHyperionArchonBoss(): {
+  group: THREE.Group;
+  meshes: THREE.Mesh[];
+  core: THREE.Mesh;
+  haloRing: THREE.Mesh;
+} {
+  const group = new THREE.Group();
+  const meshes: THREE.Mesh[] = [];
+
+  // 1. Sleek Obsidian Archon Spire
+  const spireGeo = new THREE.OctahedronGeometry(2.2, 0);
+  const spireMat = new THREE.MeshStandardMaterial({
+    color: 0x0f172a,
+    metalness: 0.95,
+    roughness: 0.1,
+    emissive: 0x6366f1,
+    emissiveIntensity: 0.4,
+  });
+  const spire = new THREE.Mesh(spireGeo, spireMat);
+  spire.position.set(0, 2.6, 0);
+  spire.scale.set(1.1, 1.8, 1.1);
+  spire.castShadow = true;
+  group.add(spire);
+  meshes.push(spire);
+
+  // 2. Swirling Quantum Halo Ring
+  const haloGeo = new THREE.TorusGeometry(3.5, 0.12, 8, 32);
+  const haloMat = new THREE.MeshBasicMaterial({
+    color: 0xa855f7,
+    wireframe: true,
+  });
+  const haloRing = new THREE.Mesh(haloGeo, haloMat);
+  haloRing.position.set(0, 2.6, 0);
+  haloRing.rotation.x = Math.PI / 2;
+  group.add(haloRing);
+
+  // 3. Ultra-Bright Void Core
+  const coreGeo = new THREE.IcosahedronGeometry(1.1, 2);
+  const coreMat = new THREE.MeshStandardMaterial({
+    color: 0xc084fc,
+    emissive: 0x9333ea,
+    emissiveIntensity: 3.5,
+  });
+  const core = new THREE.Mesh(coreGeo, coreMat);
+  core.position.set(0, 2.6, 0);
+  group.add(core);
+
+  // 4. Six Orbiting Prism Pylons
+  for (let i = 0; i < 6; i++) {
+    const angle = (i * Math.PI * 2) / 6;
+    const pylonGeo = new THREE.ConeGeometry(0.3, 1.6, 4);
+    pylonGeo.rotateX(Math.PI / 2);
+    const pylon = new THREE.Mesh(pylonGeo, materials.sniperArmor);
+    pylon.position.set(Math.cos(angle) * 3.5, 2.6, Math.sin(angle) * 3.5);
+    pylon.rotation.y = -angle;
+    group.add(pylon);
+    meshes.push(pylon);
+  }
+
+  // 5. Heavy Twin Beam Emitter Prongs at the front
+  for (let s of [-1.2, 1.2]) {
+    const prong = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.4, 2.8), materials.playerGuns);
+    prong.position.set(s, 2.2, -1.8);
+    group.add(prong);
+    meshes.push(prong);
+  }
+
+  // 6. Ground Shadow
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(8.0, 8.0), softShadowMaterial);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.02;
+  group.add(shadow);
+
+  return { group, meshes, core, haloRing };
+}
+
+/**
+ * Escort Shield Drone for Bosses
+ */
+export function createShieldDrone(): {
+  group: THREE.Group;
+  meshes: THREE.Mesh[];
+  dome: THREE.Mesh;
+} {
+  const group = new THREE.Group();
+  const meshes: THREE.Mesh[] = [];
+
+  const bodyGeo = new THREE.CylinderGeometry(0.4, 0.5, 0.35, 6);
+  const body = new THREE.Mesh(bodyGeo, materials.stalkerArmor);
+  body.position.set(0, 1.2, 0);
+  body.castShadow = true;
+  group.add(body);
+  meshes.push(body);
+
+  const domeGeo = new THREE.SphereGeometry(0.28, 8, 8);
+  const domeMat = new THREE.MeshStandardMaterial({
+    color: 0x00f0ff,
+    emissive: 0x00d8ff,
+    emissiveIntensity: 2.5,
+  });
+  const dome = new THREE.Mesh(domeGeo, domeMat);
+  dome.position.set(0, 1.45, 0);
+  group.add(dome);
+  meshes.push(dome);
+
+  // Shadow
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2), softShadowMaterial);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.02;
+  group.add(shadow);
+
+  return { group, meshes, dome };
+}
+
