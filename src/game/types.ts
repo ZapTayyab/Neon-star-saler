@@ -4,6 +4,9 @@ export type EnemyType =
   | 'stalker'
   | 'goliath'
   | 'sniper'
+  | 'shredder'
+  | 'mortar_destroyer'
+  | 'phase_stalker'
   | 'colossus'
   | 'boss_goliath_prime'
   | 'boss_nexus_colossus'
@@ -68,6 +71,51 @@ export interface PlayerStats {
   bossName: string;
   bossPhase: string;
   bossHpRatio: number | null;
+  // Map Location & Biome Telemetry
+  mapTier: number;
+  mapLocationName: string;
+  mapHazardLevel: string;
+  // Tactical Radar / Mini-map Telemetry
+  radar?: RadarData;
+}
+
+export interface RadarEnemy {
+  id: number;
+  type: EnemyType;
+  x: number;
+  z: number;
+  relX: number;
+  relZ: number;
+  dist: number;
+  angle: number;
+  isTelegraphing: boolean;
+  isBoss: boolean;
+}
+
+export interface RadarObstacle {
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  radius: number;
+  shape: 'box' | 'cylinder';
+  type: string;
+}
+
+export interface RadarData {
+  playerX: number;
+  playerZ: number;
+  playerRot: number;
+  arenaRadius: number;
+  enemies: RadarEnemy[];
+  obstacles: RadarObstacle[];
+  portal: {
+    active: boolean;
+    x: number;
+    z: number;
+    dist: number;
+    angle: number;
+  } | null;
 }
 
 export interface TelegraphIndicator {

@@ -69,6 +69,9 @@ export default function App() {
     bossName: '',
     bossPhase: '',
     bossHpRatio: null,
+    mapTier: 1,
+    mapLocationName: 'NEON CITADEL FOUNDRY',
+    mapHazardLevel: 'STANDARD',
   });
 
   const [bossHpRatio, setBossHpRatio] = useState<number | null>(null);

@@ -200,9 +200,12 @@ export function buildArena(scene: THREE.Scene, renderer: THREE.WebGLRenderer): A
   rimLight.position.set(-25, 20, -25);
   scene.add(rimLight);
 
-  // 4. Extended Floor Plane
+  // 4. Extended Floor Plane (Seamless expansive ground for open-world play)
   let floorData = createArenaFloorTexture(renderer, '#00f0ff');
-  const floorGeo = new THREE.PlaneGeometry(160, 160);
+  floorData.texture.wrapS = THREE.RepeatWrapping;
+  floorData.texture.wrapT = THREE.RepeatWrapping;
+  floorData.texture.repeat.set(3, 3);
+  const floorGeo = new THREE.PlaneGeometry(360, 360);
   const floorMat = new THREE.MeshStandardMaterial({
     map: floorData.texture,
     roughness: 0.7,
@@ -342,10 +345,18 @@ export function buildArena(scene: THREE.Scene, renderer: THREE.WebGLRenderer): A
 
     // Recreate floor canvas with sector accent color
     const newFloor = createArenaFloorTexture(renderer, theme.floorHex);
+    newFloor.texture.wrapS = THREE.RepeatWrapping;
+    newFloor.texture.wrapT = THREE.RepeatWrapping;
+    newFloor.texture.repeat.set(3, 3);
     floorMat.map?.dispose();
     floorMat.map = newFloor.texture;
     floorMat.needsUpdate = true;
   };
 
-  return { floorMesh, pylons, barrierMesh, dustParticles, update, setSector };
+  const setBoundaryActive = (active: boolean) => {
+    pylons.visible = active;
+    barrierMesh.visible = active;
+  };
+
+  return { floorMesh, pylons, barrierMesh, dustParticles, update, setSector, setBoundaryActive };
 }

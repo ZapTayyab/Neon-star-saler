@@ -12,6 +12,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { PlayerStats } from '../game/types';
+import { MiniMap } from './MiniMap';
 
 interface GameHUDProps {
   stats: PlayerStats;
@@ -54,6 +55,62 @@ export const GameHUD: React.FC<GameHUDProps> = ({
     }
     prevComboRef.current = combo;
   }, [combo]);
+
+  // Subtle Pulse Animation when Combo Multiplier Increases
+  const [isMultiplierPulsed, setIsMultiplierPulsed] = useState(false);
+  const prevMultiplierRef = useRef(comboMultiplier);
+
+  useEffect(() => {
+    if (comboMultiplier > prevMultiplierRef.current) {
+      setIsMultiplierPulsed(true);
+      const timer = setTimeout(() => setIsMultiplierPulsed(false), 360);
+      prevMultiplierRef.current = comboMultiplier;
+      return () => clearTimeout(timer);
+    }
+    prevMultiplierRef.current = comboMultiplier;
+  }, [comboMultiplier]);
+
+  // Transient Red Edge-Screen Flash on Player Damage
+  const [isDamageFlashing, setIsDamageFlashing] = useState(false);
+  const [isCriticalDamage, setIsCriticalDamage] = useState(false);
+  const prevHpRef = useRef(stats.hp);
+  const prevShieldRef = useRef(stats.shield);
+
+  useEffect(() => {
+    const prevTotal = prevHpRef.current + prevShieldRef.current;
+    const currentTotal = stats.hp + stats.shield;
+
+    // Detect health or shield drop (damage impact)
+    if (currentTotal < prevTotal - 0.5 && stats.hp > 0) {
+      const isHullDamage = stats.hp < prevHpRef.current - 0.5;
+      setIsCriticalDamage(isHullDamage);
+      setIsDamageFlashing(true);
+      const timer = setTimeout(() => {
+        setIsDamageFlashing(false);
+        setIsCriticalDamage(false);
+      }, 340);
+      prevHpRef.current = stats.hp;
+      prevShieldRef.current = stats.shield;
+      return () => clearTimeout(timer);
+    }
+
+    prevHpRef.current = stats.hp;
+    prevShieldRef.current = stats.shield;
+  }, [stats.hp, stats.shield]);
+
+  // Transient Map Location Transition Banner
+  const [showMapBanner, setShowMapBanner] = useState(false);
+  const prevMapTierRef = useRef(stats.mapTier || 1);
+
+  useEffect(() => {
+    if (stats.mapTier && stats.mapTier !== prevMapTierRef.current) {
+      prevMapTierRef.current = stats.mapTier;
+      setShowMapBanner(true);
+      const timer = setTimeout(() => setShowMapBanner(false), 3800);
+      return () => clearTimeout(timer);
+    }
+    prevMapTierRef.current = stats.mapTier || 1;
+  }, [stats.mapTier]);
 
   // Streak Tiers Configuration (Glow, Colors, Labels, Scale)
   let tierLevel = 0;
@@ -116,9 +173,31 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const finalScale = isPunched ? baseScale * 1.12 : baseScale;
 
   return (
-    <div className="absolute inset-0 pointer-events-none select-none flex flex-col justify-between p-2.5 sm:p-4 md:p-6 z-10">
-      {/* Top Bar Perimeter Cluster */}
-      <div className="flex items-start justify-between w-full gap-2">
+    <>
+      {/* Transient Red Edge-Screen Physical Impact Damage Flash */}
+      <div
+        className={`fixed inset-0 pointer-events-none transition-opacity duration-300 z-50 ${
+          isDamageFlashing ? 'opacity-100' : 'opacity-0'
+        }`}
+        style={{
+          background: isCriticalDamage
+            ? 'radial-gradient(circle at center, transparent 38%, rgba(239, 68, 68, 0.28) 72%, rgba(220, 38, 38, 0.72) 100%)'
+            : 'radial-gradient(circle at center, transparent 52%, rgba(239, 68, 68, 0.18) 78%, rgba(220, 38, 38, 0.5) 100%)',
+          boxShadow: isCriticalDamage
+            ? 'inset 0 0 70px rgba(220, 38, 38, 0.85), inset 0 0 140px rgba(185, 28, 28, 0.6)'
+            : 'inset 0 0 45px rgba(239, 68, 68, 0.6), inset 0 0 95px rgba(220, 38, 38, 0.4)',
+        }}
+      >
+        {/* Subtle high-tech peripheral damage boundary lines */}
+        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent opacity-80" />
+        <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent opacity-80" />
+        <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-transparent via-red-500 to-transparent opacity-80" />
+        <div className="absolute inset-y-0 right-0 w-1 bg-gradient-to-b from-transparent via-red-500 to-transparent opacity-80" />
+      </div>
+
+      <div className="absolute inset-0 pointer-events-none select-none flex flex-col justify-between p-2.5 sm:p-4 md:p-6 z-10">
+        {/* Top Bar Perimeter Cluster */}
+        <div className="flex items-start justify-between w-full gap-2">
         {/* Top-Left: Health, Shield, Dash & EMP Cluster */}
         <div className="flex flex-col gap-1.5 w-36 sm:w-52 md:w-64">
           {/* Hull Integrity (HP) */}
@@ -197,6 +276,16 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               </span>
             </div>
           </div>
+
+          {/* Tactical Circular Mini-Map Overlay */}
+          <div className="mt-1 sm:mt-1.5 pointer-events-auto">
+            <MiniMap
+              radar={stats.radar}
+              portalActive={stats.portalActive}
+              portalDistance={stats.portalDistance}
+              portalAngle={stats.portalAngle}
+            />
+          </div>
         </div>
 
         {/* Top-Center: Sector Level, Wave Info & Quantum Portal Waypoint */}
@@ -223,6 +312,36 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               </span>
             </div>
           </div>
+
+          {/* Active Map Biome Location & Hazard Protocol */}
+          {stats.mapLocationName && (
+            <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-0.5 rounded-full border border-sky-500/40 bg-neutral-950/90 text-sky-400 text-[8px] sm:text-[9px] font-mono-numbers font-semibold tracking-wider shadow-[0_0_12px_rgba(56,189,248,0.2)]">
+              <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+              <span className="font-bold text-white uppercase">{stats.mapLocationName}</span>
+              <span className="text-neutral-500">•</span>
+              <span className="text-amber-400 font-bold uppercase">{stats.mapHazardLevel || 'STANDARD'}</span>
+            </div>
+          )}
+
+          {/* Cinematic Map Location Transition Title Card */}
+          {showMapBanner && stats.mapLocationName && (
+            <div className="fixed top-24 inset-x-0 z-40 pointer-events-none flex justify-center px-4 animate-in fade-in slide-in-from-top-6 duration-500">
+              <div className="relative max-w-lg w-full bg-neutral-950/95 border-2 border-sky-400/80 rounded-md p-3 sm:p-4 text-center shadow-[0_0_40px_rgba(56,189,248,0.45),inset_0_0_20px_rgba(0,0,0,0.8)] backdrop-blur-md">
+                <div className="flex items-center justify-center gap-2 mb-1">
+                  <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
+                  <span className="text-[10px] sm:text-xs font-mono-numbers font-bold text-sky-400 tracking-widest uppercase">
+                    SECTOR TRANSFORMATION // ENTERING NEW BIOME
+                  </span>
+                </div>
+                <div className="text-lg sm:text-2xl font-black text-white font-mono-numbers tracking-wider uppercase mb-1">
+                  {stats.mapLocationName}
+                </div>
+                <div className="text-[9px] sm:text-xs font-mono-numbers text-amber-400 font-semibold uppercase tracking-wider">
+                  TACTICAL PROTOCOL: {stats.mapHazardLevel}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Quantum Warp Portal Waypoint / Objective Alert */}
           {stats.portalActive && (
@@ -358,18 +477,28 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               </span>
             </div>
 
-            <div className="text-right">
+            <div className="text-right relative">
+              {isMultiplierPulsed && (
+                <span className="absolute -top-3.5 right-0 text-[8px] font-mono-numbers font-black text-white px-1.5 py-0.2 rounded-xs bg-cyan-500/90 shadow-[0_0_10px_rgba(6,182,212,0.95)] animate-pulse uppercase tracking-wider z-20 pointer-events-none">
+                  ▲ UP
+                </span>
+              )}
               <div
-                className={`text-xl sm:text-2xl font-black font-mono-numbers tracking-tight tabular-nums transition-all ${tierTextColor}`}
+                className={`text-xl sm:text-2xl font-black font-mono-numbers tracking-tight tabular-nums transition-all duration-200 inline-block origin-right ${
+                  isMultiplierPulsed
+                    ? 'scale-125 text-white brightness-150 drop-shadow-[0_0_12px_rgba(255,255,255,0.9)]'
+                    : 'scale-100'
+                } ${tierTextColor}`}
                 style={{
-                  textShadow:
-                    tierLevel >= 2
-                      ? tierLevel >= 4
-                        ? '0 0 16px rgba(217,70,239,0.9), 0 0 30px rgba(217,70,239,0.5)'
-                        : tierLevel === 3
-                        ? '0 0 14px rgba(249,115,22,0.85)'
-                        : '0 0 10px rgba(245,158,11,0.7)'
-                      : 'none',
+                  textShadow: isMultiplierPulsed
+                    ? '0 0 18px rgba(255,255,255,0.95), 0 0 28px rgba(6,182,212,0.9)'
+                    : tierLevel >= 2
+                    ? tierLevel >= 4
+                      ? '0 0 16px rgba(217,70,239,0.9), 0 0 30px rgba(217,70,239,0.5)'
+                      : tierLevel === 3
+                      ? '0 0 14px rgba(249,115,22,0.85)'
+                      : '0 0 10px rgba(245,158,11,0.7)'
+                    : 'none',
                 }}
               >
                 {comboMultiplier.toFixed(1)}x
@@ -440,7 +569,11 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           <span className="text-neutral-600">|</span>
           <span className="text-neutral-400">
             COMBO MULTIPLIER:{' '}
-            <b className={`${tierTextColor} font-black tabular-nums`}>
+            <b
+              className={`${tierTextColor} font-black tabular-nums inline-block transition-transform duration-200 ${
+                isMultiplierPulsed ? 'scale-120 text-white brightness-125' : 'scale-100'
+              }`}
+            >
               {comboMultiplier.toFixed(1)}x
             </b>
           </span>
@@ -465,5 +598,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       </div>
     </div>
-  );
+  </>
+);
 };

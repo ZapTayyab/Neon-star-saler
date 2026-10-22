@@ -11,13 +11,17 @@ import {
   createSiegeGoliath,
   createStalkerDrone,
   createVectorDrone,
+  createShredderDrone,
+  createMortarDestroyer,
+  createPhaseStalker,
   materials,
 } from './models';
 import { HazardManager } from './hazards';
+import { ObstacleManager, getMapForWave } from './obstacles';
 import { ParticleManager } from './particles';
 import { QuantumPortal } from './portal';
 import { applySkinToMech, getSavedSkinId, getSkinById, MechSkin, saveSkinId } from './skins';
-import { EnemyType, GameState, PlayerStats, UpgradeOption } from './types';
+import { EnemyType, GameState, PlayerStats, RadarData, RadarEnemy, UpgradeOption } from './types';
 import { createFreshUpgradePool, selectUpgradeChoices } from './upgrades';
 import { DashTrailManager } from './dashTrail';
 
@@ -161,6 +165,9 @@ export class GameEngine {
   // Localized Arena Hazards (Electrified Floor Tiles & Laser Grids)
   public hazardManager: HazardManager;
 
+  // In-Arena Physical Obstacles, Cover Bunkers & Skyscrapers
+  public obstacleManager: ObstacleManager;
+
   // Kinetic Glowing Neon Dash Trail & Holographic Afterimage System
   public dashTrailManager: DashTrailManager;
 
@@ -253,6 +260,10 @@ export class GameEngine {
     // Initialize Localized Arena Hazards
     this.hazardManager = new HazardManager(this.scene, this.particleManager);
 
+    // Initialize In-Arena Obstacles & Buildings
+    this.obstacleManager = new ObstacleManager(this.scene);
+    this.obstacleManager.setMapTier(1, 0x00f0ff);
+
     // Initialize Glowing Neon Dash Trail & Afterimage System
     this.dashTrailManager = new DashTrailManager(this.scene);
     this.dashTrailManager.setTrailColor(this.currentSkin?.colors?.trail || 0x00f0ff);
@@ -303,6 +314,10 @@ export class GameEngine {
       bossName: '',
       bossPhase: '',
       bossHpRatio: null,
+      // Map Location & Obstacle Telemetry
+      mapTier: 1,
+      mapLocationName: 'NEON CITADEL FOUNDRY',
+      mapHazardLevel: 'STANDARD',
     };
 
     // Holographic target reticle and laser sight guide on ground
@@ -626,6 +641,10 @@ export class GameEngine {
     this.isWarpingLevel = false;
     this.quantumPortal.despawn();
     this.hazardManager.clear();
+    this.playerStats.mapTier = 1;
+    this.playerStats.mapLocationName = 'NEON CITADEL FOUNDRY';
+    this.playerStats.mapHazardLevel = 'STANDARD';
+    this.obstacleManager.setMapTier(1, 0x00f0ff);
     this.arena.setSector(1);
     this.playerModel.group.position.set(0, 0.6, 0);
     this.playerModel.group.rotation.set(0, 0, 0);
@@ -653,8 +672,22 @@ export class GameEngine {
     this.bossShieldDrones = [];
   }
 
+  public updateMapLocation(waveNumber: number) {
+    const mapDef = getMapForWave(waveNumber);
+    if (this.playerStats.mapTier !== mapDef.tier) {
+      this.playerStats.mapTier = mapDef.tier;
+      this.playerStats.mapLocationName = mapDef.name;
+      this.playerStats.mapHazardLevel = mapDef.hazardLevel;
+      this.obstacleManager.setMapTier(mapDef.tier, mapDef.accentColor);
+      this.arena.setSector(mapDef.tier);
+      sound.playPortalWarp();
+      this.addTrauma(0.45);
+    }
+  }
+
   // --- Wave Director ---
   public startWave(waveNumber: number) {
+    this.updateMapLocation(waveNumber);
     this.playerStats.wave = waveNumber;
     this.waveTimer = 0;
     this.waveEnemiesToSpawn = [];
@@ -698,12 +731,18 @@ export class GameEngine {
       // Spawn boss as main encounter
       this.waveEnemiesToSpawn.push({ type: bossType, delay: 0.8 });
 
-      // Escort support
-      const escortCount = Math.min(2 + Math.floor(waveNumber / 6), 5);
+      // Escort support incorporating ruthless enemy variants
+      const escortCount = Math.min(2 + Math.floor(waveNumber / 6), 6);
       for (let i = 0; i < escortCount; i++) {
+        let eType: EnemyType = i % 2 === 0 ? 'stalker' : 'sniper';
+        if (waveNumber >= 20 && i % 3 === 0) {
+          eType = 'phase_stalker';
+        } else if (waveNumber >= 10 && i % 2 === 1) {
+          eType = 'shredder';
+        }
         this.waveEnemiesToSpawn.push({
-          type: i % 2 === 0 ? 'stalker' : 'sniper',
-          delay: 3.5 + i * 2.5,
+          type: eType,
+          delay: 3.5 + i * 2.2,
         });
       }
     } else {
@@ -714,19 +753,35 @@ export class GameEngine {
       this.activeBossType = null;
       this.onStatsUpdate({ ...this.playerStats });
 
-      // Procedural regular wave compositions
-      const stalkerCount = 6 + waveNumber * 3;
-      const goliathCount = waveNumber >= 2 ? Math.floor(waveNumber * 1.2) : 0;
-      const sniperCount = waveNumber >= 3 ? Math.floor(waveNumber * 0.9) : 0;
+      // Procedural regular wave compositions with ruthless enemy scalings
+      const stalkerCount = Math.max(4, 6 + waveNumber * 2);
+      const goliathCount = waveNumber >= 2 ? Math.floor(waveNumber * 0.9) : 0;
+      const sniperCount = waveNumber >= 3 ? Math.floor(waveNumber * 0.7) : 0;
+
+      // Ruthless Berserker Shredder Drones introduced at Wave 10+
+      const shredderCount = waveNumber >= 10 ? Math.floor((waveNumber - 7) * 0.9) : 0;
+      // Heavy Mortar Destroyers introduced at Wave 10+
+      const mortarCount = waveNumber >= 10 ? Math.max(1, Math.floor((waveNumber - 8) * 0.5)) : 0;
+      // Void Phase Stalkers introduced at Wave 20+
+      const phaseStalkerCount = waveNumber >= 20 ? Math.max(2, Math.floor((waveNumber - 17) * 0.7)) : 0;
 
       for (let i = 0; i < stalkerCount; i++) {
-        this.waveEnemiesToSpawn.push({ type: 'stalker', delay: 0.5 + i * 0.7 });
+        this.waveEnemiesToSpawn.push({ type: 'stalker', delay: 0.5 + i * 0.6 });
       }
       for (let i = 0; i < goliathCount; i++) {
-        this.waveEnemiesToSpawn.push({ type: 'goliath', delay: 2.0 + i * 2.5 });
+        this.waveEnemiesToSpawn.push({ type: 'goliath', delay: 1.5 + i * 2.2 });
       }
       for (let i = 0; i < sniperCount; i++) {
-        this.waveEnemiesToSpawn.push({ type: 'sniper', delay: 3.0 + i * 2.0 });
+        this.waveEnemiesToSpawn.push({ type: 'sniper', delay: 2.5 + i * 1.8 });
+      }
+      for (let i = 0; i < shredderCount; i++) {
+        this.waveEnemiesToSpawn.push({ type: 'shredder', delay: 1.0 + i * 1.2 });
+      }
+      for (let i = 0; i < mortarCount; i++) {
+        this.waveEnemiesToSpawn.push({ type: 'mortar_destroyer', delay: 3.0 + i * 2.5 });
+      }
+      for (let i = 0; i < phaseStalkerCount; i++) {
+        this.waveEnemiesToSpawn.push({ type: 'phase_stalker', delay: 2.0 + i * 1.8 });
       }
     }
   }
@@ -872,6 +927,90 @@ export class GameEngine {
         telegraphProgress: 0,
         hitFlashTimer: 0,
         subParts: { chargeRing },
+      };
+    } else if (type === 'shredder') {
+      // Level 10+ Ruthless Berserker Shredder Drone
+      const { group, meshes, bladeL, bladeR, eye } = createShredderDrone();
+      group.position.set(x, 0, z);
+      this.scene.add(group);
+      entity = {
+        id,
+        type,
+        group,
+        meshes,
+        x,
+        y: 0,
+        z,
+        vx: 0,
+        vz: 0,
+        rotation: 0,
+        targetRotation: 0,
+        maxHp: 75 + this.playerStats.wave * 16,
+        hp: 75 + this.playerStats.wave * 16,
+        speed: 12.0 + Math.min(this.playerStats.wave * 0.25, 4.0),
+        radius: 0.9,
+        state: 'chase',
+        timer: 0,
+        windupDuration: 0.45,
+        telegraphProgress: 0,
+        hitFlashTimer: 0,
+        subParts: { bladeL, bladeR, eye },
+      };
+    } else if (type === 'mortar_destroyer') {
+      // Level 10+ Ruthless Heavy Mortar Destroyer
+      const { group, meshes, mortarBarrel, heatsink } = createMortarDestroyer();
+      group.position.set(x, 0, z);
+      this.scene.add(group);
+      entity = {
+        id,
+        type,
+        group,
+        meshes,
+        x,
+        y: 0,
+        z,
+        vx: 0,
+        vz: 0,
+        rotation: 0,
+        targetRotation: 0,
+        maxHp: 260 + this.playerStats.wave * 40,
+        hp: 260 + this.playerStats.wave * 40,
+        speed: 4.2,
+        radius: 1.6,
+        state: 'chase',
+        timer: 0,
+        windupDuration: 1.4,
+        telegraphProgress: 0,
+        hitFlashTimer: 0,
+        subParts: { mortarBarrel, heatsink },
+      };
+    } else if (type === 'phase_stalker') {
+      // Level 20+ Ruthless Void Phase Stalker
+      const { group, meshes, core, halo } = createPhaseStalker();
+      group.position.set(x, 0, z);
+      this.scene.add(group);
+      entity = {
+        id,
+        type,
+        group,
+        meshes,
+        x,
+        y: 0,
+        z,
+        vx: 0,
+        vz: 0,
+        rotation: 0,
+        targetRotation: 0,
+        maxHp: 150 + this.playerStats.wave * 26,
+        hp: 150 + this.playerStats.wave * 26,
+        speed: 9.8,
+        radius: 1.1,
+        state: 'chase',
+        timer: 0,
+        windupDuration: 0.75,
+        telegraphProgress: 0,
+        hitFlashTimer: 0,
+        subParts: { core, halo },
       };
     } else if (type === 'boss_goliath_prime') {
       // Wave 6 Boss: Goliath Prime - Heavy Siege Dreadnought
@@ -1358,7 +1497,18 @@ export class GameEngine {
       this.playerStats.comboTimer = 3.5;
       const multiplier = 1 + Math.min(this.playerStats.combo * 0.1, 4.0);
       this.playerStats.comboMultiplier = Number(multiplier.toFixed(1));
-      const basePoints = enemy.type === 'goliath' ? 400 : 150;
+      const basePoints =
+        enemy.type === 'mortar_destroyer'
+          ? 450
+          : enemy.type === 'goliath'
+          ? 400
+          : enemy.type === 'phase_stalker'
+          ? 350
+          : enemy.type === 'shredder'
+          ? 250
+          : enemy.type === 'sniper'
+          ? 200
+          : 150;
       this.playerStats.score += Math.round(basePoints * multiplier);
       this.playerStats.empCharge = Math.min(100, this.playerStats.empCharge + (isLarge ? 35 : 12));
 
@@ -1682,6 +1832,11 @@ export class GameEngine {
       this.playerX = (this.playerX / distFromCenter) * maxBound;
       this.playerZ = (this.playerZ / distFromCenter) * maxBound;
     }
+
+    // In-Arena Building & Obstacle Collision Resolution (Smooth sliding)
+    const colResult = this.obstacleManager.resolveEntityCollision(this.playerX, this.playerZ, 1.0);
+    this.playerX = colResult.x;
+    this.playerZ = colResult.z;
 
     // --- Smart Targeting & Aiming (Continuous Cursor Tracking & Reticle) ---
     if (this.hasMouseAim) {
@@ -2025,6 +2180,43 @@ export class GameEngine {
     // --- Update Pickups ---
     this.updatePickups(dt, time);
 
+    // Build tactical radar telemetry for circular mini-map overlay
+    const radarEnemies: RadarEnemy[] = this.enemies.map((e) => {
+      const dx = e.x - this.playerX;
+      const dz = e.z - this.playerZ;
+      const dist = Math.hypot(dx, dz);
+      return {
+        id: e.id,
+        type: e.type,
+        x: e.x,
+        z: e.z,
+        relX: dx,
+        relZ: dz,
+        dist,
+        angle: Math.atan2(dx, -dz),
+        isTelegraphing: e.telegraphProgress > 0 || (e.windupDuration > 0 && e.state === 'windup'),
+        isBoss: e.type.startsWith('boss_') || e.type === 'colossus',
+      };
+    });
+
+    this.playerStats.radar = {
+      playerX: this.playerX,
+      playerZ: this.playerZ,
+      playerRot: this.playerRot,
+      arenaRadius: ARENA_RADIUS,
+      enemies: radarEnemies,
+      obstacles: this.obstacleManager.getRadarObstacles(),
+      portal: this.quantumPortal.isActive
+        ? {
+            active: true,
+            x: this.quantumPortal.x,
+            z: this.quantumPortal.z,
+            dist: this.quantumPortal.getDistance(this.playerX, this.playerZ),
+            angle: this.quantumPortal.getAngle(this.playerX, this.playerZ),
+          }
+        : null,
+    };
+
     // Sync stats to UI
     this.onStatsUpdate({ ...this.playerStats });
   }
@@ -2067,9 +2259,9 @@ export class GameEngine {
         enemy.hitFlashTimer -= dt;
         if (enemy.hitFlashTimer <= 0) {
           enemy.meshes.forEach((m) => {
-            if (enemy.type === 'stalker') m.material = materials.stalkerArmor;
-            else if (enemy.type === 'goliath') m.material = materials.goliathArmor;
-            else if (enemy.type === 'sniper') m.material = materials.sniperArmor;
+            if (enemy.type === 'stalker' || enemy.type === 'shredder') m.material = materials.stalkerArmor;
+            else if (enemy.type === 'goliath' || enemy.type === 'mortar_destroyer') m.material = materials.goliathArmor;
+            else if (enemy.type === 'sniper' || enemy.type === 'phase_stalker') m.material = materials.sniperArmor;
             else m.material = materials.bossArmor;
           });
         }
@@ -2201,6 +2393,199 @@ export class GameEngine {
           this.fireEnemyShot(enemy.x, enemy.z, this.playerX, this.playerZ, 30, 36);
           this.particleManager.spawn(enemy.x, 0.8, enemy.z, 15, 0xd946ef, 12, 0.4, 0.25);
           enemy.timer = 0;
+        }
+      } else if (enemy.type === 'shredder') {
+        // --- LEVEL 10+ RUTHLESS ENEMY: BERSERKER SHREDDER DRONE ---
+        // Rapid zigzag evasion & scythe spinning
+        if (enemy.subParts?.bladeL && enemy.subParts?.bladeR) {
+          (enemy.subParts.bladeL as THREE.Mesh).rotation.y = Math.sin(time * 28) * 0.5;
+          (enemy.subParts.bladeR as THREE.Mesh).rotation.y = -Math.sin(time * 28) * 0.5;
+        }
+
+        if (enemy.state === 'chase') {
+          // Dynamic oscillatory weave trajectory
+          const weaveFreq = 7.0;
+          const weaveAmp = 3.2;
+          const perpX = -dz / (dist || 1);
+          const perpZ = dx / (dist || 1);
+          const lateral = Math.sin(time * weaveFreq + enemy.id) * weaveAmp;
+
+          enemy.vx = ((dx / (dist || 1)) + perpX * (lateral / (dist || 1))) * enemy.speed;
+          enemy.vz = ((dz / (dist || 1)) + perpZ * (lateral / (dist || 1))) * enemy.speed;
+          enemy.rotation = Math.atan2(-enemy.vx, -enemy.vz);
+
+          if (dist < 8.5) {
+            enemy.state = 'windup';
+            enemy.timer = 0;
+            sound.playTelegraphAlert();
+          }
+        } else if (enemy.state === 'windup') {
+          enemy.timer += dt;
+          enemy.telegraphProgress = enemy.timer / enemy.windupDuration;
+          enemy.vx *= 0.8;
+          enemy.vz *= 0.8;
+          enemy.rotation = Math.atan2(-dx, -dz);
+
+          if (enemy.subParts?.eye) {
+            (enemy.subParts.eye as THREE.Mesh).scale.setScalar(1 + enemy.telegraphProgress * 1.6);
+          }
+
+          if (enemy.timer >= enemy.windupDuration) {
+            enemy.state = 'attack';
+            enemy.timer = 0;
+            sound.playShredderLunge();
+            // Blistering high speed lunge straight toward player
+            const lungeSpeed = 30.0;
+            enemy.vx = (dx / (dist || 1)) * lungeSpeed;
+            enemy.vz = (dz / (dist || 1)) * lungeSpeed;
+            this.particleManager.spawn(enemy.x, 0.55, enemy.z, 22, 0xff3b00, 14, 0.45, 0.25);
+          }
+        } else if (enemy.state === 'attack') {
+          enemy.timer += dt;
+          if (dist < enemy.radius + 1.1) {
+            this.damagePlayer(28);
+            enemy.state = 'cooldown';
+            enemy.timer = 0;
+          }
+          if (enemy.timer >= 0.38) {
+            enemy.state = 'cooldown';
+            enemy.timer = 0;
+          }
+        } else if (enemy.state === 'cooldown') {
+          enemy.timer += dt;
+          enemy.vx *= 0.86;
+          enemy.vz *= 0.86;
+          if (enemy.subParts?.eye) {
+            (enemy.subParts.eye as THREE.Mesh).scale.set(1, 1, 1);
+          }
+          if (enemy.timer >= 0.9) {
+            enemy.state = 'chase';
+          }
+        }
+      } else if (enemy.type === 'mortar_destroyer') {
+        // --- LEVEL 10+ RUTHLESS ENEMY: HEAVY MORTAR DESTROYER ---
+        enemy.rotation = Math.atan2(-dx, -dz);
+
+        if (enemy.state === 'chase') {
+          if (dist > 18) {
+            enemy.vx = (dx / (dist || 1)) * enemy.speed;
+            enemy.vz = (dz / (dist || 1)) * enemy.speed;
+          } else if (dist < 9) {
+            // Tactical reverse away if player gets in point-blank range
+            enemy.vx = -(dx / (dist || 1)) * (enemy.speed * 0.7);
+            enemy.vz = -(dz / (dist || 1)) * (enemy.speed * 0.7);
+          } else {
+            enemy.vx *= 0.84;
+            enemy.vz *= 0.84;
+            enemy.state = 'windup';
+            enemy.timer = 0;
+          }
+        } else if (enemy.state === 'windup') {
+          enemy.timer += dt;
+          enemy.telegraphProgress = enemy.timer / enemy.windupDuration;
+          enemy.vx *= 0.8;
+          enemy.vz *= 0.8;
+
+          // Thermal heatsink glow and elevation
+          if (enemy.subParts?.heatsink) {
+            const hMesh = enemy.subParts.heatsink as THREE.Mesh;
+            (hMesh.material as THREE.MeshBasicMaterial).color.setHex(
+              enemy.telegraphProgress > 0.65 ? 0xffffff : 0xff4400
+            );
+          }
+
+          if (enemy.timer >= enemy.windupDuration) {
+            enemy.state = 'cooldown';
+            enemy.timer = 0;
+            sound.playMortarLaunch();
+
+            // Lobbed mortar artillery targeting player's predicted coordinates
+            const leadX = this.playerX + this.playerVx * 0.65 + (Math.random() - 0.5) * 2;
+            const leadZ = this.playerZ + this.playerVz * 0.65 + (Math.random() - 0.5) * 2;
+
+            // Telegraph ground blast hazard zone
+            this.particleManager.spawn(leadX, 0.1, leadZ, 32, 0xf97316, 8, 0.85, 0.5);
+
+            // Delayed high-yield detonation
+            window.setTimeout(() => {
+              if (this.gameState === 'playing') {
+                sound.playExplosion(true);
+                this.addTrauma(0.45);
+                this.particleManager.spawn(leadX, 0.7, leadZ, 70, 0xff5500, 18, 0.9, 0.6);
+                const pDist = Math.hypot(this.playerX - leadX, this.playerZ - leadZ);
+                if (pDist < 4.2 && !this.playerStats.isDashing) {
+                  this.damagePlayer(36);
+                }
+              }
+            }, 850);
+          }
+        } else if (enemy.state === 'cooldown') {
+          enemy.timer += dt;
+          if (enemy.timer >= 2.4) {
+            enemy.state = 'chase';
+          }
+        }
+      } else if (enemy.type === 'phase_stalker') {
+        // --- LEVEL 20+ RUTHLESS ENEMY: VOID PHASE STALKER ---
+        enemy.rotation = Math.atan2(-dx, -dz);
+
+        if (enemy.subParts?.halo) {
+          (enemy.subParts.halo as THREE.Mesh).rotation.z = time * 6.5;
+        }
+        if (enemy.subParts?.core) {
+          (enemy.subParts.core as THREE.Mesh).rotation.y = time * 4.0;
+        }
+
+        if (enemy.state === 'chase') {
+          enemy.vx = (dx / (dist || 1)) * enemy.speed;
+          enemy.vz = (dz / (dist || 1)) * enemy.speed;
+
+          if (dist < 15.0) {
+            enemy.state = 'windup';
+            enemy.timer = 0;
+          }
+        } else if (enemy.state === 'windup') {
+          enemy.timer += dt;
+          enemy.telegraphProgress = enemy.timer / enemy.windupDuration;
+          enemy.vx *= 0.8;
+          enemy.vz *= 0.8;
+
+          // Disperse into void energy before quantum blink
+          if (enemy.timer >= enemy.windupDuration) {
+            enemy.state = 'attack';
+            enemy.timer = 0;
+            sound.playPhaseTeleport();
+            this.particleManager.spawn(enemy.x, 0.75, enemy.z, 25, 0xa855f7, 10, 0.4, 0.3);
+
+            // Phase teleport: warp adjacent to player (ignoring obstacles!)
+            const warpAngle = Math.random() * Math.PI * 2;
+            const warpRadius = 6.0 + Math.random() * 3.0;
+            enemy.x = Math.max(-ARENA_RADIUS + 2.5, Math.min(ARENA_RADIUS - 2.5, this.playerX + Math.cos(warpAngle) * warpRadius));
+            enemy.z = Math.max(-ARENA_RADIUS + 2.5, Math.min(ARENA_RADIUS - 2.5, this.playerZ + Math.sin(warpAngle) * warpRadius));
+
+            this.particleManager.spawn(enemy.x, 0.75, enemy.z, 30, 0xd946ef, 12, 0.5, 0.35);
+
+            // Fan of 3 void energy bolts
+            const shotAng = Math.atan2(this.playerX - enemy.x, this.playerZ - enemy.z);
+            [-0.2, 0, 0.2].forEach((spread) => {
+              const targetX = enemy.x + Math.sin(shotAng + spread) * 20;
+              const targetZ = enemy.z + Math.cos(shotAng + spread) * 20;
+              this.fireEnemyShot(enemy.x, enemy.z, targetX, targetZ, 22, 22);
+            });
+          }
+        } else if (enemy.state === 'attack') {
+          enemy.timer += dt;
+          if (enemy.timer >= 0.35) {
+            enemy.state = 'cooldown';
+            enemy.timer = 0;
+          }
+        } else if (enemy.state === 'cooldown') {
+          enemy.timer += dt;
+          enemy.vx *= 0.9;
+          enemy.vz *= 0.9;
+          if (enemy.timer >= 1.7) {
+            enemy.state = 'chase';
+          }
         }
       } else if (enemy.type === 'boss_goliath_prime') {
         // --- WAVE 6 APEX BOSS: GOLIATH PRIME ---
@@ -2455,8 +2840,15 @@ export class GameEngine {
       enemy.x += enemy.vx * dt;
       enemy.z += enemy.vz * dt;
 
+      // In-Arena Building & Obstacle Collision (Phase Stalkers phase through cover during quantum attacks!)
+      if (!(enemy.type === 'phase_stalker' && (enemy.state === 'attack' || enemy.state === 'windup'))) {
+        const eCol = this.obstacleManager.resolveEntityCollision(enemy.x, enemy.z, enemy.radius);
+        enemy.x = eCol.x;
+        enemy.z = eCol.z;
+      }
+
       // Arena clamp
-      const dCenter = Math.hypot(enemy.x, enemy.y);
+      const dCenter = Math.hypot(enemy.x, enemy.z);
       if (dCenter > ARENA_RADIUS - 1.5) {
         enemy.x = (enemy.x / dCenter) * (ARENA_RADIUS - 1.5);
         enemy.z = (enemy.z / dCenter) * (ARENA_RADIUS - 1.5);
@@ -2478,6 +2870,23 @@ export class GameEngine {
 
       // Check lifetime / arena bounds
       if (p.life >= p.maxLife || Math.hypot(p.x, p.z) > ARENA_RADIUS) {
+        this.scene.remove(p.mesh);
+        this.projectiles.splice(i, 1);
+        continue;
+      }
+
+      // Check physical building & obstacle collisions (allows cover tactics!)
+      const obsHit = this.obstacleManager.checkProjectileHit(p.x, p.z, p.radius);
+      if (obsHit.hit) {
+        this.particleManager.spawnHitExplosion(
+          obsHit.hitX,
+          p.y,
+          obsHit.hitZ,
+          p.color,
+          -p.vx * 0.35,
+          -p.vz * 0.35,
+          1.0
+        );
         this.scene.remove(p.mesh);
         this.projectiles.splice(i, 1);
         continue;

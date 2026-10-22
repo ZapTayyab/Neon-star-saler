@@ -819,3 +819,209 @@ export function createShieldDrone(): {
   return { group, meshes, dome };
 }
 
+/**
+ * Level 10+ Ruthless Enemy: Berserker Shredder Drone
+ * High-speed assault skimmer with twin forward spinning scythe blades and afterburner flames
+ */
+export function createShredderDrone(): {
+  group: THREE.Group;
+  meshes: THREE.Mesh[];
+  bladeL: THREE.Mesh;
+  bladeR: THREE.Mesh;
+  eye: THREE.Mesh;
+} {
+  const group = new THREE.Group();
+  const meshes: THREE.Mesh[] = [];
+
+  // 1. Angular Razor Cockpit Chassis
+  const bodyGeo = new THREE.ConeGeometry(0.5, 1.1, 4);
+  bodyGeo.rotateX(Math.PI / 2);
+  const body = new THREE.Mesh(bodyGeo, materials.stalkerArmor);
+  body.position.set(0, 0.55, 0);
+  body.castShadow = true;
+  group.add(body);
+  meshes.push(body);
+
+  // 2. Glowing Visor Eye
+  const eyeGeo = new THREE.BoxGeometry(0.35, 0.1, 0.15);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff1100 });
+  const eye = new THREE.Mesh(eyeGeo, eyeMat);
+  eye.position.set(0, 0.55, -0.58);
+  group.add(eye);
+  meshes.push(eye);
+
+  // 3 & 4. Twin Serrated Scythe Cutter Blades
+  const bladeGeo = new THREE.BoxGeometry(0.08, 0.06, 0.95);
+  const bladeMat = new THREE.MeshStandardMaterial({
+    color: 0xff3b30,
+    emissive: 0xff0022,
+    emissiveIntensity: 1.8,
+    metalness: 0.9,
+    roughness: 0.1,
+  });
+
+  const bladeL = new THREE.Mesh(bladeGeo, bladeMat);
+  bladeL.position.set(0.48, 0.5, -0.65);
+  bladeL.rotation.y = 0.35;
+  bladeL.castShadow = true;
+  group.add(bladeL);
+  meshes.push(bladeL);
+
+  const bladeR = new THREE.Mesh(bladeGeo, bladeMat);
+  bladeR.position.set(-0.48, 0.5, -0.65);
+  bladeR.rotation.y = -0.35;
+  bladeR.castShadow = true;
+  group.add(bladeR);
+  meshes.push(bladeR);
+
+  // 5 & 6. Dual Overclocked Afterburners
+  const flameGeo = new THREE.ConeGeometry(0.12, 0.65, 6);
+  flameGeo.rotateX(-Math.PI / 2);
+  const flameMat = new THREE.MeshBasicMaterial({ color: 0xff5500 });
+  const fL = new THREE.Mesh(flameGeo, flameMat);
+  fL.position.set(0.32, 0.55, 0.7);
+  const fR = new THREE.Mesh(flameGeo, flameMat);
+  fR.position.set(-0.32, 0.55, 0.7);
+  group.add(fL, fR);
+
+  // Contact shadow
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6), softShadowMaterial);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.02;
+  group.add(shadow);
+
+  return { group, meshes, bladeL, bladeR, eye };
+}
+
+/**
+ * Level 10+ Ruthless Enemy: Heavy Mortar Destroyer
+ * Heavily armored dreadnought walker with an elevated siege mortar artillery cannon
+ */
+export function createMortarDestroyer(): {
+  group: THREE.Group;
+  meshes: THREE.Mesh[];
+  mortarBarrel: THREE.Mesh;
+  heatsink: THREE.Mesh;
+} {
+  const group = new THREE.Group();
+  const meshes: THREE.Mesh[] = [];
+
+  // 1. Reinforced Tracked Chassis
+  const bodyGeo = new THREE.BoxGeometry(1.8, 0.9, 1.6);
+  const body = new THREE.Mesh(bodyGeo, materials.goliathArmor);
+  body.position.set(0, 0.95, 0);
+  body.castShadow = true;
+  group.add(body);
+  meshes.push(body);
+
+  // 2. Heavy Armor Plates
+  const plateGeo = new THREE.BoxGeometry(2.1, 0.45, 1.8);
+  const plate = new THREE.Mesh(plateGeo, materials.goliathPlates);
+  plate.position.set(0, 0.85, 0);
+  plate.castShadow = true;
+  group.add(plate);
+  meshes.push(plate);
+
+  // 3. Elevated Siege Mortar Cannon Barrel (Angled upward for lobbed artillery)
+  const mortarGeo = new THREE.CylinderGeometry(0.24, 0.32, 1.6, 8);
+  mortarGeo.rotateX(-Math.PI / 3); // 60 degree elevation
+  const mortarMat = new THREE.MeshStandardMaterial({
+    color: 0x0f172a,
+    metalness: 0.95,
+    roughness: 0.15,
+  });
+  const mortarBarrel = new THREE.Mesh(mortarGeo, mortarMat);
+  mortarBarrel.position.set(0, 1.8, -0.2);
+  mortarBarrel.castShadow = true;
+  group.add(mortarBarrel);
+  meshes.push(mortarBarrel);
+
+  // Muzzle band
+  const bandGeo = new THREE.TorusGeometry(0.34, 0.06, 6, 16);
+  bandGeo.rotateX(-Math.PI / 3);
+  const bandMat = new THREE.MeshBasicMaterial({ color: 0xf97316 });
+  const band = new THREE.Mesh(bandGeo, bandMat);
+  band.position.set(0, 2.45, -0.6);
+  group.add(band);
+
+  // 4. Glowing Thermal Heatsink Grate on back
+  const heatGeo = new THREE.BoxGeometry(0.8, 0.3, 0.15);
+  const heatMat = new THREE.MeshBasicMaterial({ color: 0xff4400 });
+  const heatsink = new THREE.Mesh(heatGeo, heatMat);
+  heatsink.position.set(0, 1.3, 0.82);
+  group.add(heatsink);
+
+  // Contact shadow
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 3.0), softShadowMaterial);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.02;
+  group.add(shadow);
+
+  return { group, meshes, mortarBarrel, heatsink };
+}
+
+/**
+ * Level 20+ Ruthless Enemy: Void Phase Stalker
+ * Teleporting quantum assassin drone with crystalline void wings and phasing halo
+ */
+export function createPhaseStalker(): {
+  group: THREE.Group;
+  meshes: THREE.Mesh[];
+  core: THREE.Mesh;
+  halo: THREE.Mesh;
+} {
+  const group = new THREE.Group();
+  const meshes: THREE.Mesh[] = [];
+
+  // 1. Sleek Crystalline Obsidian Fuselage
+  const bodyGeo = new THREE.OctahedronGeometry(0.65, 0);
+  bodyGeo.scale(0.8, 0.6, 1.4);
+  const body = new THREE.Mesh(bodyGeo, materials.sniperArmor);
+  body.position.set(0, 0.7, 0);
+  body.castShadow = true;
+  group.add(body);
+  meshes.push(body);
+
+  // 2. Void Singularity Core
+  const coreGeo = new THREE.SphereGeometry(0.22, 12, 12);
+  const coreMat = new THREE.MeshBasicMaterial({ color: 0xd946ef });
+  const core = new THREE.Mesh(coreGeo, coreMat);
+  core.position.set(0, 0.7, -0.4);
+  group.add(core);
+  meshes.push(core);
+
+  // 3. Floating Anti-Gravity Phasing Halo Ring
+  const haloGeo = new THREE.TorusGeometry(0.85, 0.06, 8, 24);
+  haloGeo.rotateX(Math.PI / 2);
+  const haloMat = new THREE.MeshBasicMaterial({
+    color: 0xa855f7,
+    transparent: true,
+    opacity: 0.8,
+  });
+  const halo = new THREE.Mesh(haloGeo, haloMat);
+  halo.position.set(0, 0.7, 0);
+  group.add(halo);
+
+  // 4 & 5. Swept Crystalline Phase Wings
+  const wingGeo = new THREE.BoxGeometry(1.6, 0.04, 0.6);
+  const wingMat = new THREE.MeshStandardMaterial({
+    color: 0x3b0764,
+    emissive: 0x7e22ce,
+    emissiveIntensity: 1.2,
+    metalness: 0.9,
+    roughness: 0.2,
+  });
+  const wings = new THREE.Mesh(wingGeo, wingMat);
+  wings.position.set(0, 0.75, 0.2);
+  group.add(wings);
+  meshes.push(wings);
+
+  // Contact shadow
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.8), softShadowMaterial);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.02;
+  group.add(shadow);
+
+  return { group, meshes, core, halo };
+}
+
