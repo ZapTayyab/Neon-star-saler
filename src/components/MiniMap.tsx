@@ -23,6 +23,7 @@ export const MiniMap: React.FC<MiniMapProps> = ({
   }
 
   const { playerRot, enemies, portal, arenaRadius } = radar;
+  const isUnbounded = arenaRadius === 0;
   const isPortalActive = portalActive || portal?.active;
   const pDist = portalDistance ?? portal?.dist ?? null;
   const pAngle = portalAngle ?? portal?.angle ?? null;
@@ -37,6 +38,14 @@ export const MiniMap: React.FC<MiniMapProps> = ({
   const bossEntity = enemies.find((e) => e.isBoss);
   const hostileCount = enemies.length;
 
+  const cycleZoom = () => {
+    setZoomRange((prev) => {
+      if (prev === 18) return 30;
+      if (prev === 30) return isUnbounded ? 45 : 18;
+      return 18;
+    });
+  };
+
   return (
     <div className="relative pointer-events-auto select-none flex flex-col items-start gap-1">
       {/* Mini-map Header & Tactical Status Bar */}
@@ -48,15 +57,19 @@ export const MiniMap: React.FC<MiniMapProps> = ({
                 ? 'bg-red-500 animate-ping'
                 : telegraphingCount > 0
                 ? 'bg-amber-400 animate-pulse'
+                : isUnbounded
+                ? 'bg-sky-400'
                 : 'bg-cyan-400'
             }`}
           />
-          <span className="tracking-wider text-cyan-400">RADAR</span>
+          <span className="tracking-wider text-cyan-400">
+            {isUnbounded ? 'OVERLOAD' : 'RADAR'}
+          </span>
         </div>
 
         <div className="flex items-center gap-1.5">
           <button
-            onClick={() => setZoomRange((prev) => (prev === 30 ? 18 : 30))}
+            onClick={cycleZoom}
             className="text-[7px] px-1 py-0.2 rounded-xs border border-neutral-800 bg-neutral-900/90 text-neutral-300 hover:text-cyan-300 cursor-pointer transition-colors"
             title="Toggle Radar Zoom"
           >
@@ -121,15 +134,27 @@ export const MiniMap: React.FC<MiniMapProps> = ({
               stroke="rgba(0, 240, 255, 0.2)"
               strokeWidth="0.8"
             />
-            {/* Outer boundary ring (Arena Perimeter) */}
-            <circle
-              cx={center}
-              cy={center}
-              r={radius * Math.min(1.0, arenaRadius / zoomRange)}
-              fill="none"
-              stroke="rgba(0, 240, 255, 0.35)"
-              strokeWidth="1"
-            />
+            {/* Outer boundary ring (Arena Perimeter: visible only during waves 1-10) */}
+            {arenaRadius > 0 ? (
+              <circle
+                cx={center}
+                cy={center}
+                r={radius * Math.min(1.0, arenaRadius / zoomRange)}
+                fill="none"
+                stroke="rgba(0, 240, 255, 0.4)"
+                strokeWidth="1.2"
+              />
+            ) : (
+              <circle
+                cx={center}
+                cy={center}
+                r={radius}
+                fill="none"
+                stroke="rgba(56, 189, 248, 0.2)"
+                strokeWidth="0.8"
+                strokeDasharray="3,3"
+              />
+            )}
 
             {/* Radar Crosshairs */}
             <line
@@ -473,6 +498,8 @@ export const MiniMap: React.FC<MiniMapProps> = ({
             </span>
           ) : bossEntity ? (
             <span className="text-red-400 font-bold tracking-tight">BOSS APEX</span>
+          ) : isUnbounded ? (
+            <span className="text-sky-400 font-bold tracking-tight">UNBOUNDED</span>
           ) : (
             <span className="text-cyan-400/80">SECURE</span>
           )}

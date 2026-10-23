@@ -160,6 +160,7 @@ export interface ArenaComponents {
   dustParticles: THREE.Points;
   update: (time: number) => void;
   setSector: (level: number) => void;
+  setBoundaryActive: (active: boolean) => void;
 }
 
 export function buildArena(scene: THREE.Scene, renderer: THREE.WebGLRenderer): ArenaComponents {

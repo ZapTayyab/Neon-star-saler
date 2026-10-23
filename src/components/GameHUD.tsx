@@ -10,6 +10,8 @@ import {
   Flame,
   Sparkles,
   TrendingUp,
+  AlertOctagon,
+  AlertTriangle,
 } from 'lucide-react';
 import { PlayerStats } from '../game/types';
 import { MiniMap } from './MiniMap';
@@ -111,6 +113,19 @@ export const GameHUD: React.FC<GameHUDProps> = ({
     }
     prevMapTierRef.current = stats.mapTier || 1;
   }, [stats.mapTier]);
+
+  // Critical Overload Alert Banner Trigger when wave > 10 is first reached
+  const [showOverloadIntro, setShowOverloadIntro] = useState(false);
+  const prevWaveRef = useRef(stats.wave);
+
+  useEffect(() => {
+    if (stats.wave > 10 && prevWaveRef.current <= 10) {
+      setShowOverloadIntro(true);
+      const timer = setTimeout(() => setShowOverloadIntro(false), 5000);
+      return () => clearTimeout(timer);
+    }
+    prevWaveRef.current = stats.wave;
+  }, [stats.wave]);
 
   // Streak Tiers Configuration (Glow, Colors, Labels, Scale)
   let tierLevel = 0;
@@ -316,10 +331,77 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           {/* Active Map Biome Location & Hazard Protocol */}
           {stats.mapLocationName && (
             <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-0.5 rounded-full border border-sky-500/40 bg-neutral-950/90 text-sky-400 text-[8px] sm:text-[9px] font-mono-numbers font-semibold tracking-wider shadow-[0_0_12px_rgba(56,189,248,0.2)]">
-              <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+              <span className={`w-1.5 h-1.5 rounded-full ${stats.wave > 10 ? 'bg-red-500 animate-ping' : 'bg-sky-400 animate-pulse'}`} />
               <span className="font-bold text-white uppercase">{stats.mapLocationName}</span>
               <span className="text-neutral-500">•</span>
               <span className="text-amber-400 font-bold uppercase">{stats.mapHazardLevel || 'STANDARD'}</span>
+              {stats.wave > 10 && (
+                <>
+                  <span className="text-neutral-500">•</span>
+                  <span className="text-red-400 font-bold uppercase tracking-wider">UNBOUNDED</span>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* CRITICAL OVERLOAD Visual Indicator (Active past Level 10) */}
+          {stats.wave > 10 && (
+            <div className="flex items-center gap-2 px-3 py-1 rounded-xs border-2 border-red-500/85 bg-neutral-950/95 text-white shadow-[0_0_24px_rgba(239,68,68,0.55),inset_0_0_14px_rgba(220,38,38,0.3)] backdrop-blur-md">
+              <div className="flex items-center gap-1.5">
+                <AlertOctagon className="w-3.5 h-3.5 text-red-500 animate-spin" style={{ animationDuration: '6s' }} />
+                <div className="flex flex-col items-start leading-none">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] sm:text-[11px] font-black font-mono-numbers tracking-widest text-red-400 drop-shadow-[0_0_8px_rgba(239,68,68,0.85)] animate-pulse">
+                      CRITICAL OVERLOAD
+                    </span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
+                  </div>
+                  <span className="text-[7px] sm:text-[8px] font-mono-numbers font-bold text-amber-300 tracking-wider uppercase mt-0.5">
+                    BOUNDARIES REMOVED • DIFFICULTY ESCALATED • FREE ROAM ACTIVE
+                  </span>
+                </div>
+              </div>
+
+              {/* Tactical Overload Telemetry Pills */}
+              <div className="hidden sm:flex items-center gap-1 pl-2 border-l border-red-500/40 text-[7px] font-mono-numbers">
+                <span className="px-1.5 py-0.5 rounded-xs bg-red-950/90 text-red-300 border border-red-500/60 font-bold tracking-wider">
+                  ENEMY DMG +25%
+                </span>
+                <span className="px-1.5 py-0.5 rounded-xs bg-amber-950/90 text-amber-300 border border-amber-500/60 font-bold tracking-wider">
+                  SPEED +22%
+                </span>
+                <span className="px-1.5 py-0.5 rounded-xs bg-sky-950/90 text-sky-300 border border-sky-500/60 font-bold tracking-wider">
+                  360M FIELD
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Critical Overload Transition Hologram Banner (Wave 11 Breached) */}
+          {showOverloadIntro && (
+            <div className="fixed top-20 inset-x-0 z-50 pointer-events-none flex justify-center px-4 animate-in fade-in zoom-in-95 duration-500">
+              <div className="relative max-w-xl w-full bg-neutral-950/95 border-2 border-red-500 rounded-md p-4 text-center shadow-[0_0_60px_rgba(239,68,68,0.7),inset_0_0_30px_rgba(185,28,28,0.5)] backdrop-blur-md overflow-hidden">
+                <div
+                  className="absolute inset-0 opacity-10 pointer-events-none"
+                  style={{
+                    backgroundImage:
+                      'repeating-linear-gradient(45deg, #ef4444, #ef4444 12px, transparent 12px, transparent 24px)',
+                  }}
+                />
+                <div className="relative z-10 flex flex-col items-center gap-1.5">
+                  <div className="flex items-center gap-2 text-red-400 font-mono-numbers font-black text-xs sm:text-sm tracking-widest uppercase">
+                    <AlertOctagon className="w-5 h-5 text-red-500 animate-spin" />
+                    <span>SYSTEM PROTOCOL OVERRIDE</span>
+                    <AlertOctagon className="w-5 h-5 text-red-500 animate-spin" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black font-mono-numbers text-white tracking-widest uppercase drop-shadow-[0_0_20px_rgba(239,68,68,0.9)] animate-pulse">
+                    CRITICAL OVERLOAD
+                  </div>
+                  <div className="text-[10px] sm:text-xs font-mono-numbers text-amber-300 font-bold uppercase tracking-wider max-w-md">
+                    ARENA PERIMETER FORCEFIELDS COLLAPSED • COMBAT BOUNDARIES REMOVED • HOSTILE SWARM DIFFICULTY ESCALATED TO MAXIMUM
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -330,14 +412,18 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 <div className="flex items-center justify-center gap-2 mb-1">
                   <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
                   <span className="text-[10px] sm:text-xs font-mono-numbers font-bold text-sky-400 tracking-widest uppercase">
-                    SECTOR TRANSFORMATION // ENTERING NEW BIOME
+                    {stats.wave > 10
+                      ? 'LEVEL 10 CLEARED // ARENA PERIMETER DISENGAGED'
+                      : 'SECTOR TRANSFORMATION // ENTERING NEW BIOME'}
                   </span>
                 </div>
                 <div className="text-lg sm:text-2xl font-black text-white font-mono-numbers tracking-wider uppercase mb-1">
                   {stats.mapLocationName}
                 </div>
                 <div className="text-[9px] sm:text-xs font-mono-numbers text-amber-400 font-semibold uppercase tracking-wider">
-                  TACTICAL PROTOCOL: {stats.mapHazardLevel}
+                  {stats.wave > 10
+                    ? 'FREE ROAM UNBOUNDED // BUILDINGS & OBSTACLES ACTIVE // ENEMY THREAT CRITICAL'
+                    : `TACTICAL PROTOCOL: ${stats.mapHazardLevel}`}
                 </div>
               </div>
             </div>

@@ -673,15 +673,37 @@ export class GameEngine {
   }
 
   public updateMapLocation(waveNumber: number) {
+    const isLevel10Cleared = waveNumber > 10;
+    // Boundary is active only during waves 1-10; after level 10 is cleared, boundary is removed!
+    this.arena.setBoundaryActive(!isLevel10Cleared);
+
     const mapDef = getMapForWave(waveNumber);
-    if (this.playerStats.mapTier !== mapDef.tier) {
+    const tierChanged = this.playerStats.mapTier !== mapDef.tier;
+
+    if (tierChanged || (!isLevel10Cleared && this.obstacleManager.obstacles.length > 0)) {
       this.playerStats.mapTier = mapDef.tier;
       this.playerStats.mapLocationName = mapDef.name;
       this.playerStats.mapHazardLevel = mapDef.hazardLevel;
-      this.obstacleManager.setMapTier(mapDef.tier, mapDef.accentColor);
+
+      if (!isLevel10Cleared) {
+        // Enclosed arena: strictly NO buildings or obstacles appear before Level 10 is cleared!
+        this.obstacleManager.clear();
+      } else {
+        // Level 10 cleared: Deploy buildings & obstacles for open metropolis!
+        this.obstacleManager.setMapTier(mapDef.tier, mapDef.accentColor);
+      }
+
       this.arena.setSector(mapDef.tier);
-      sound.playPortalWarp();
-      this.addTrauma(0.45);
+
+      if (waveNumber === 11) {
+        // High-impact sensory event for breaching perimeter barriers
+        sound.playBossIntroSiren();
+        triggerHaptic(120);
+        this.addTrauma(0.85);
+      } else if (tierChanged) {
+        sound.playPortalWarp();
+        this.addTrauma(0.45);
+      }
     }
   }
 
@@ -693,12 +715,14 @@ export class GameEngine {
     this.waveEnemiesToSpawn = [];
     this.bossShieldDrones = [];
 
+    const isLevel10Cleared = waveNumber > 10;
+
     // Boss waves spawn after every 6 levels (Wave 6, 12, 18, 24...)
     const isBossWave = waveNumber % 6 === 0;
 
     if (isBossWave) {
       sound.playBossIntroSiren();
-      this.addTrauma(0.65);
+      this.addTrauma(0.7);
       triggerHaptic(90);
 
       // Rotate through distinct apex boss classes
@@ -731,8 +755,8 @@ export class GameEngine {
       // Spawn boss as main encounter
       this.waveEnemiesToSpawn.push({ type: bossType, delay: 0.8 });
 
-      // Escort support incorporating ruthless enemy variants
-      const escortCount = Math.min(2 + Math.floor(waveNumber / 6), 6);
+      // Escort support with increased difficulty in open arena
+      const escortCount = Math.min(2 + Math.floor(waveNumber / 6) + (isLevel10Cleared ? 2 : 0), 8);
       for (let i = 0; i < escortCount; i++) {
         let eType: EnemyType = i % 2 === 0 ? 'stalker' : 'sniper';
         if (waveNumber >= 20 && i % 3 === 0) {
@@ -742,7 +766,7 @@ export class GameEngine {
         }
         this.waveEnemiesToSpawn.push({
           type: eType,
-          delay: 3.5 + i * 2.2,
+          delay: 3.0 + i * (isLevel10Cleared ? 1.6 : 2.2),
         });
       }
     } else {
@@ -753,35 +777,49 @@ export class GameEngine {
       this.activeBossType = null;
       this.onStatsUpdate({ ...this.playerStats });
 
-      // Procedural regular wave compositions with ruthless enemy scalings
-      const stalkerCount = Math.max(4, 6 + waveNumber * 2);
-      const goliathCount = waveNumber >= 2 ? Math.floor(waveNumber * 0.9) : 0;
-      const sniperCount = waveNumber >= 3 ? Math.floor(waveNumber * 0.7) : 0;
+      // Procedural regular wave compositions with major difficulty increase after Level 10
+      const stalkerCount = isLevel10Cleared
+        ? Math.floor((6 + waveNumber * 2.8) * 1.35)
+        : Math.max(4, 6 + waveNumber * 2);
+      const goliathCount = waveNumber >= 2
+        ? Math.floor(waveNumber * (isLevel10Cleared ? 1.35 : 0.9))
+        : 0;
+      const sniperCount = waveNumber >= 3
+        ? Math.floor(waveNumber * (isLevel10Cleared ? 1.15 : 0.7))
+        : 0;
 
-      // Ruthless Berserker Shredder Drones introduced at Wave 10+
-      const shredderCount = waveNumber >= 10 ? Math.floor((waveNumber - 7) * 0.9) : 0;
-      // Heavy Mortar Destroyers introduced at Wave 10+
-      const mortarCount = waveNumber >= 10 ? Math.max(1, Math.floor((waveNumber - 8) * 0.5)) : 0;
+      // Ruthless Berserker Shredder Drones introduced at Wave 11+ (Level 10 cleared)
+      const shredderCount = isLevel10Cleared
+        ? Math.max(3, Math.floor((waveNumber - 8) * 1.4))
+        : 0;
+      // Heavy Mortar Destroyers introduced at Wave 11+ (Level 10 cleared)
+      const mortarCount = isLevel10Cleared
+        ? Math.max(2, Math.floor((waveNumber - 8) * 0.85))
+        : 0;
       // Void Phase Stalkers introduced at Wave 20+
-      const phaseStalkerCount = waveNumber >= 20 ? Math.max(2, Math.floor((waveNumber - 17) * 0.7)) : 0;
+      const phaseStalkerCount = waveNumber >= 20
+        ? Math.max(3, Math.floor((waveNumber - 16) * 1.1))
+        : 0;
+
+      const spawnInterval = isLevel10Cleared ? 0.38 : 0.6;
 
       for (let i = 0; i < stalkerCount; i++) {
-        this.waveEnemiesToSpawn.push({ type: 'stalker', delay: 0.5 + i * 0.6 });
+        this.waveEnemiesToSpawn.push({ type: 'stalker', delay: 0.4 + i * spawnInterval });
       }
       for (let i = 0; i < goliathCount; i++) {
-        this.waveEnemiesToSpawn.push({ type: 'goliath', delay: 1.5 + i * 2.2 });
+        this.waveEnemiesToSpawn.push({ type: 'goliath', delay: 1.2 + i * (spawnInterval * 2.5) });
       }
       for (let i = 0; i < sniperCount; i++) {
-        this.waveEnemiesToSpawn.push({ type: 'sniper', delay: 2.5 + i * 1.8 });
+        this.waveEnemiesToSpawn.push({ type: 'sniper', delay: 2.0 + i * (spawnInterval * 2.2) });
       }
       for (let i = 0; i < shredderCount; i++) {
-        this.waveEnemiesToSpawn.push({ type: 'shredder', delay: 1.0 + i * 1.2 });
+        this.waveEnemiesToSpawn.push({ type: 'shredder', delay: 0.8 + i * (spawnInterval * 1.5) });
       }
       for (let i = 0; i < mortarCount; i++) {
-        this.waveEnemiesToSpawn.push({ type: 'mortar_destroyer', delay: 3.0 + i * 2.5 });
+        this.waveEnemiesToSpawn.push({ type: 'mortar_destroyer', delay: 2.2 + i * (spawnInterval * 3.0) });
       }
       for (let i = 0; i < phaseStalkerCount; i++) {
-        this.waveEnemiesToSpawn.push({ type: 'phase_stalker', delay: 2.0 + i * 1.8 });
+        this.waveEnemiesToSpawn.push({ type: 'phase_stalker', delay: 1.6 + i * (spawnInterval * 2.0) });
       }
     }
   }
@@ -840,10 +878,25 @@ export class GameEngine {
 
   private spawnEnemy(type: EnemyType) {
     const id = this.nextEnemyId++;
+    const isLevel10Cleared = this.playerStats.wave > 10;
     const angle = Math.random() * Math.PI * 2;
-    const dist = ARENA_RADIUS - 3;
-    const x = Math.cos(angle) * dist;
-    const z = Math.sin(angle) * dist;
+    let x: number, z: number;
+
+    if (!isLevel10Cleared) {
+      // Level 1-10 Enclosed arena: spawn along the perimeter barrier
+      const dist = ARENA_RADIUS - 3;
+      x = Math.cos(angle) * dist;
+      z = Math.sin(angle) * dist;
+    } else {
+      // Level 10 Cleared: Free-roam unbounded metropolis, enemies spawn in tactical arcs around player
+      const dist = 24 + Math.random() * 14;
+      x = this.playerX + Math.cos(angle) * dist;
+      z = this.playerZ + Math.sin(angle) * dist;
+    }
+
+    // Difficulty multiplier after Level 10 is cleared
+    const hpMult = isLevel10Cleared ? 1.35 : 1.0;
+    const speedMult = isLevel10Cleared ? 1.22 : 1.0;
 
     let entity: EnemyEntity;
 
@@ -851,6 +904,7 @@ export class GameEngine {
       const { group, meshes, eye } = createStalkerDrone();
       group.position.set(x, 0, z);
       this.scene.add(group);
+      const stalkerHp = Math.round((45 + this.playerStats.wave * 10) * hpMult);
       entity = {
         id,
         type,
@@ -863,13 +917,13 @@ export class GameEngine {
         vz: 0,
         rotation: 0,
         targetRotation: 0,
-        maxHp: 45 + this.playerStats.wave * 10,
-        hp: 45 + this.playerStats.wave * 10,
-        speed: 9.5 + Math.min(this.playerStats.wave * 0.4, 4),
+        maxHp: stalkerHp,
+        hp: stalkerHp,
+        speed: (9.5 + Math.min(this.playerStats.wave * 0.4, 4)) * speedMult,
         radius: 0.8,
         state: 'chase',
         timer: 0,
-        windupDuration: 0.7,
+        windupDuration: isLevel10Cleared ? 0.55 : 0.7,
         telegraphProgress: 0,
         hitFlashTimer: 0,
         subParts: { eye },
@@ -878,6 +932,7 @@ export class GameEngine {
       const { group, meshes, barrels } = createSiegeGoliath();
       group.position.set(x, 0, z);
       this.scene.add(group);
+      const goliathHp = Math.round((200 + this.playerStats.wave * 35) * hpMult);
       entity = {
         id,
         type,
@@ -890,13 +945,13 @@ export class GameEngine {
         vz: 0,
         rotation: 0,
         targetRotation: 0,
-        maxHp: 200 + this.playerStats.wave * 35,
-        hp: 200 + this.playerStats.wave * 35,
-        speed: 4.5,
+        maxHp: goliathHp,
+        hp: goliathHp,
+        speed: 4.5 * speedMult,
         radius: 1.5,
         state: 'chase',
         timer: 0,
-        windupDuration: 1.2,
+        windupDuration: isLevel10Cleared ? 0.95 : 1.2,
         telegraphProgress: 0,
         hitFlashTimer: 0,
         subParts: { barrels },
@@ -905,6 +960,7 @@ export class GameEngine {
       const { group, meshes, chargeRing } = createVectorDrone();
       group.position.set(x, 0, z);
       this.scene.add(group);
+      const sniperHp = Math.round((90 + this.playerStats.wave * 20) * hpMult);
       entity = {
         id,
         type,
@@ -917,13 +973,13 @@ export class GameEngine {
         vz: 0,
         rotation: 0,
         targetRotation: 0,
-        maxHp: 90 + this.playerStats.wave * 20,
-        hp: 90 + this.playerStats.wave * 20,
-        speed: 6.0,
+        maxHp: sniperHp,
+        hp: sniperHp,
+        speed: 6.0 * speedMult,
         radius: 1.0,
         state: 'chase',
         timer: 0,
-        windupDuration: 1.3,
+        windupDuration: isLevel10Cleared ? 1.05 : 1.3,
         telegraphProgress: 0,
         hitFlashTimer: 0,
         subParts: { chargeRing },
@@ -933,6 +989,7 @@ export class GameEngine {
       const { group, meshes, bladeL, bladeR, eye } = createShredderDrone();
       group.position.set(x, 0, z);
       this.scene.add(group);
+      const shredderHp = Math.round((75 + this.playerStats.wave * 16) * hpMult);
       entity = {
         id,
         type,
@@ -945,13 +1002,13 @@ export class GameEngine {
         vz: 0,
         rotation: 0,
         targetRotation: 0,
-        maxHp: 75 + this.playerStats.wave * 16,
-        hp: 75 + this.playerStats.wave * 16,
-        speed: 12.0 + Math.min(this.playerStats.wave * 0.25, 4.0),
+        maxHp: shredderHp,
+        hp: shredderHp,
+        speed: (12.0 + Math.min(this.playerStats.wave * 0.25, 4.0)) * speedMult,
         radius: 0.9,
         state: 'chase',
         timer: 0,
-        windupDuration: 0.45,
+        windupDuration: 0.4,
         telegraphProgress: 0,
         hitFlashTimer: 0,
         subParts: { bladeL, bladeR, eye },
@@ -961,6 +1018,7 @@ export class GameEngine {
       const { group, meshes, mortarBarrel, heatsink } = createMortarDestroyer();
       group.position.set(x, 0, z);
       this.scene.add(group);
+      const mortarHp = Math.round((260 + this.playerStats.wave * 40) * hpMult);
       entity = {
         id,
         type,
@@ -973,13 +1031,13 @@ export class GameEngine {
         vz: 0,
         rotation: 0,
         targetRotation: 0,
-        maxHp: 260 + this.playerStats.wave * 40,
-        hp: 260 + this.playerStats.wave * 40,
-        speed: 4.2,
+        maxHp: mortarHp,
+        hp: mortarHp,
+        speed: 4.2 * speedMult,
         radius: 1.6,
         state: 'chase',
         timer: 0,
-        windupDuration: 1.4,
+        windupDuration: 1.25,
         telegraphProgress: 0,
         hitFlashTimer: 0,
         subParts: { mortarBarrel, heatsink },
@@ -989,6 +1047,7 @@ export class GameEngine {
       const { group, meshes, core, halo } = createPhaseStalker();
       group.position.set(x, 0, z);
       this.scene.add(group);
+      const phaseHp = Math.round((150 + this.playerStats.wave * 26) * hpMult);
       entity = {
         id,
         type,
@@ -1001,38 +1060,40 @@ export class GameEngine {
         vz: 0,
         rotation: 0,
         targetRotation: 0,
-        maxHp: 150 + this.playerStats.wave * 26,
-        hp: 150 + this.playerStats.wave * 26,
-        speed: 9.8,
+        maxHp: phaseHp,
+        hp: phaseHp,
+        speed: 9.8 * speedMult,
         radius: 1.1,
         state: 'chase',
         timer: 0,
-        windupDuration: 0.75,
+        windupDuration: 0.65,
         telegraphProgress: 0,
         hitFlashTimer: 0,
         subParts: { core, halo },
       };
     } else if (type === 'boss_goliath_prime') {
       // Wave 6 Boss: Goliath Prime - Heavy Siege Dreadnought
+      const bossX = isLevel10Cleared ? this.playerX : 0;
+      const bossZ = isLevel10Cleared ? this.playerZ - 26 : -ARENA_RADIUS + 6;
       const { group, meshes, core, mortarL, mortarR } = createGoliathPrimeBoss();
-      group.position.set(0, 0, -ARENA_RADIUS + 6);
+      group.position.set(bossX, 0, bossZ);
       this.scene.add(group);
-      const bossHp = 2600 + this.playerStats.wave * 420;
+      const bossHp = Math.round((2600 + this.playerStats.wave * 420) * (isLevel10Cleared ? 1.3 : 1.0));
       entity = {
         id,
         type,
         group,
         meshes,
-        x: 0,
+        x: bossX,
         y: 0,
-        z: -ARENA_RADIUS + 6,
+        z: bossZ,
         vx: 0,
         vz: 0,
         rotation: 0,
         targetRotation: 0,
         maxHp: bossHp,
         hp: bossHp,
-        speed: 3.4,
+        speed: 3.4 * speedMult,
         radius: 3.2,
         state: 'chase',
         timer: 0,
@@ -1044,25 +1105,27 @@ export class GameEngine {
       this.bossEntity = entity;
     } else if (type === 'boss_nexus_colossus' || type === 'colossus') {
       // Wave 12 Boss: Nexus Omni-Colossus
+      const bossX = isLevel10Cleared ? this.playerX : 0;
+      const bossZ = isLevel10Cleared ? this.playerZ - 26 : -ARENA_RADIUS + 6;
       const { group, meshes, core, shieldMesh } = createColossusBoss();
-      group.position.set(0, 0, -ARENA_RADIUS + 6);
+      group.position.set(bossX, 0, bossZ);
       this.scene.add(group);
-      const bossHp = 4200 + this.playerStats.wave * 520;
+      const bossHp = Math.round((4200 + this.playerStats.wave * 520) * (isLevel10Cleared ? 1.3 : 1.0));
       entity = {
         id,
         type: 'boss_nexus_colossus',
         group,
         meshes,
-        x: 0,
+        x: bossX,
         y: 0,
-        z: -ARENA_RADIUS + 6,
+        z: bossZ,
         vx: 0,
         vz: 0,
         rotation: 0,
         targetRotation: 0,
         maxHp: bossHp,
         hp: bossHp,
-        speed: 3.0,
+        speed: 3.0 * speedMult,
         radius: 3.6,
         state: 'chase',
         timer: 0,
@@ -1074,25 +1137,27 @@ export class GameEngine {
       this.bossEntity = entity;
     } else if (type === 'boss_hyperion_archon') {
       // Wave 18+ Boss: Hyperion Archon - Void Overlord
+      const bossX = isLevel10Cleared ? this.playerX : 0;
+      const bossZ = isLevel10Cleared ? this.playerZ - 26 : -ARENA_RADIUS + 6;
       const { group, meshes, core, haloRing } = createHyperionArchonBoss();
-      group.position.set(0, 0, -ARENA_RADIUS + 6);
+      group.position.set(bossX, 0, bossZ);
       this.scene.add(group);
-      const bossHp = 6000 + this.playerStats.wave * 650;
+      const bossHp = Math.round((6000 + this.playerStats.wave * 650) * (isLevel10Cleared ? 1.3 : 1.0));
       entity = {
         id,
         type,
         group,
         meshes,
-        x: 0,
+        x: bossX,
         y: 0,
-        z: -ARENA_RADIUS + 6,
+        z: bossZ,
         vx: 0,
         vz: 0,
         rotation: 0,
         targetRotation: 0,
         maxHp: bossHp,
         hp: bossHp,
-        speed: 3.8,
+        speed: 3.8 * speedMult,
         radius: 3.8,
         state: 'chase',
         timer: 0,
@@ -1228,11 +1293,15 @@ export class GameEngine {
 
   public fireEnemyShot(x: number, z: number, targetX: number, targetZ: number, damage: number, speed: number = 22) {
     sound.playEnemyLaser();
+    const isLevel10Cleared = this.playerStats.wave > 10;
+    const finalDamage = isLevel10Cleared ? Math.round(damage * 1.25) : damage;
+    const finalSpeed = isLevel10Cleared ? speed * 1.2 : speed;
+
     const dx = targetX - x;
     const dz = targetZ - z;
     const dist = Math.hypot(dx, dz) || 1;
-    const vx = (dx / dist) * speed;
-    const vz = (dz / dist) * speed;
+    const vx = (dx / dist) * finalSpeed;
+    const vz = (dz / dist) * finalSpeed;
 
     const geo = new THREE.SphereGeometry(0.25, 8, 8);
     const mat = new THREE.MeshBasicMaterial({ color: 0xff3b30 });
@@ -1247,7 +1316,7 @@ export class GameEngine {
       z,
       vx,
       vz,
-      damage,
+      damage: finalDamage,
       isEnemy: true,
       pierceRemaining: 0,
       life: 0,
@@ -1825,9 +1894,10 @@ export class GameEngine {
     this.playerX += this.playerVx * dt;
     this.playerZ += this.playerVz * dt;
 
-    // Arena boundary containment
+    // Arena boundary containment: 30m perimeter during waves 1-10; unbounded exploration up to 165m when Level 10 cleared
+    const isLevel10Cleared = this.playerStats.wave > 10;
     const distFromCenter = Math.hypot(this.playerX, this.playerZ);
-    const maxBound = ARENA_RADIUS - 1.2;
+    const maxBound = isLevel10Cleared ? 165.0 : ARENA_RADIUS - 1.2;
     if (distFromCenter > maxBound) {
       this.playerX = (this.playerX / distFromCenter) * maxBound;
       this.playerZ = (this.playerZ / distFromCenter) * maxBound;
@@ -2203,7 +2273,7 @@ export class GameEngine {
       playerX: this.playerX,
       playerZ: this.playerZ,
       playerRot: this.playerRot,
-      arenaRadius: ARENA_RADIUS,
+      arenaRadius: this.playerStats.wave <= 10 ? ARENA_RADIUS : 0,
       enemies: radarEnemies,
       obstacles: this.obstacleManager.getRadarObstacles(),
       portal: this.quantumPortal.isActive
@@ -2847,11 +2917,12 @@ export class GameEngine {
         enemy.z = eCol.z;
       }
 
-      // Arena clamp
+      // Arena clamp: 30m perimeter during waves 1-10; up to 170m in open metropolis after Level 10 is cleared
       const dCenter = Math.hypot(enemy.x, enemy.z);
-      if (dCenter > ARENA_RADIUS - 1.5) {
-        enemy.x = (enemy.x / dCenter) * (ARENA_RADIUS - 1.5);
-        enemy.z = (enemy.z / dCenter) * (ARENA_RADIUS - 1.5);
+      const enemyMaxBound = this.playerStats.wave > 10 ? 170.0 : ARENA_RADIUS - 1.5;
+      if (dCenter > enemyMaxBound) {
+        enemy.x = (enemy.x / dCenter) * enemyMaxBound;
+        enemy.z = (enemy.z / dCenter) * enemyMaxBound;
       }
 
       enemy.group.position.set(enemy.x, 0, enemy.z);
@@ -2860,6 +2931,7 @@ export class GameEngine {
   }
 
   private updateProjectiles(dt: number) {
+    const isLevel10Cleared = this.playerStats.wave > 10;
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
       p.life += dt;
@@ -2868,8 +2940,12 @@ export class GameEngine {
 
       p.mesh.position.set(p.x, p.y, p.z);
 
-      // Check lifetime / arena bounds
-      if (p.life >= p.maxLife || Math.hypot(p.x, p.z) > ARENA_RADIUS) {
+      // Check lifetime / arena bounds: within 30m ring during early waves; up to 90m from player in open metropolis
+      const isOutOfBounds = isLevel10Cleared
+        ? Math.hypot(p.x - this.playerX, p.z - this.playerZ) > 90
+        : Math.hypot(p.x, p.z) > ARENA_RADIUS;
+
+      if (p.life >= p.maxLife || isOutOfBounds) {
         this.scene.remove(p.mesh);
         this.projectiles.splice(i, 1);
         continue;
